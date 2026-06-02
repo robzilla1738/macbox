@@ -1,0 +1,21 @@
+{
+  "ok": true,
+  "command": "matrix",
+  "vm": null,
+  "data": {
+    "ok": true,
+    "results": [
+      {
+        "image": "macos-sequoia-clean",
+        "ok": true,
+        "launched": true,
+        "crashed": false,
+        "failed_requirements": [],
+        "report_path": "/Users/robert/.macbox/runs/2026-06-02T02-08-11Z-macbox-gate-490e4114/reports/report.json",
+        "crash_reports": []
+      }
+    ]
+  },
+  "warnings": [],
+  "errors": []
+}

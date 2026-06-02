@@ -31,7 +31,7 @@ SECRET_NAME_PATTERNS = (
     re.compile(r"(?i)credential"),
 )
 
-ALLOWED_UPLOAD_SUFFIXES = (".app", ".pkg")
+ALLOWED_UPLOAD_SUFFIXES = (".app", ".pkg", ".dmg")
 DISPOSABLE_VM_PREFIX = "macbox-"
 
 
@@ -114,6 +114,7 @@ def validate_upload_path(
     *,
     allow_override: bool = False,
     mcp_mode: bool = False,
+    allowed_suffixes: tuple[str, ...] | None = None,
 ) -> Path:
     resolved = expand_path(local_path)
 
@@ -130,22 +131,25 @@ def validate_upload_path(
         )
 
     suffix = _upload_suffix(resolved)
-    if mcp_mode and suffix not in ALLOWED_UPLOAD_SUFFIXES:
+    allowed = allowed_suffixes or ALLOWED_UPLOAD_SUFFIXES
+    if mcp_mode and suffix not in allowed:
         raise SafetyError(
-            f"MCP uploads must be .app or .pkg bundles/files: {resolved}",
-            details={"path": str(resolved), "allowed": list(ALLOWED_UPLOAD_SUFFIXES)},
+            f"MCP uploads must be one of: {', '.join(allowed)}: {resolved}",
+            details={"path": str(resolved), "allowed": list(allowed)},
         )
 
-    if suffix not in ALLOWED_UPLOAD_SUFFIXES and mcp_mode is False:
+    if suffix not in allowed and mcp_mode is False:
         raise SafetyError(
-            f"Upload must be a .app bundle or .pkg file: {resolved}",
-            details={"path": str(resolved), "allowed": list(ALLOWED_UPLOAD_SUFFIXES)},
+            f"Upload must be one of: {', '.join(allowed)}: {resolved}",
+            details={"path": str(resolved), "allowed": list(allowed)},
         )
 
     return resolved
 
 
 def _upload_suffix(path: Path) -> str:
+    if path.suffix == ".dmg":
+        return ".dmg"
     if path.suffix == ".pkg":
         return ".pkg"
     if path.suffix == ".app" or path.name.endswith(".app"):

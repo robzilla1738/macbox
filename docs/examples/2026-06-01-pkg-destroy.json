@@ -1,0 +1,10 @@
+{
+  "ok": true,
+  "command": "destroy",
+  "vm": "macbox-demo-pkg",
+  "data": {
+    "destroyed": true
+  },
+  "warnings": [],
+  "errors": []
+}

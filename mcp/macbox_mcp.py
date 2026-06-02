@@ -9,8 +9,7 @@ import uuid
 from pathlib import Path
 from typing import Any
 
-from macbox.redact import redact_value
-from macbox.redact import redact_secrets
+from macbox.redact import redact_secrets, redact_value
 from macbox.runner import run_command
 from macbox.safety import validate_upload_path, validate_vm_name
 
@@ -33,7 +32,7 @@ def _macbox_argv() -> list[str]:
 
 def _run_macbox(*args: str) -> dict[str, Any]:
     argv = _macbox_argv() + list(args)
-    result = run_command(argv, timeout=600)
+    result = run_command(argv, timeout=1200)
     if not result.stdout.strip():
         return {
             "ok": False,
@@ -45,9 +44,7 @@ def _run_macbox(*args: str) -> dict[str, Any]:
                 {
                     "code": "CLI_ERROR",
                     "message": redact_secrets(result.stderr or "macbox CLI produced no output"),
-                    "details": redact_value(
-                        {"exit_code": result.exit_code, "argv": list(argv)}
-                    ),
+                    "details": redact_value({"exit_code": result.exit_code, "argv": list(argv)}),
                 }
             ],
         }
@@ -74,13 +71,74 @@ def list_images() -> dict[str, Any]:
 
 
 @mcp.tool()
-def create_sandbox(image: str, headless: bool = True) -> dict[str, Any]:
-    """Create and start a disposable sandbox VM from a base image."""
+def list_profiles() -> dict[str, Any]:
+    """List built-in and configured sandbox profiles."""
+    return _run_macbox("profiles", "--json")
+
+
+@mcp.tool()
+def create_sandbox(image: str, headless: bool = True, profile: str | None = None) -> dict[str, Any]:
+    """Create and start a disposable sandbox VM from a base image or profile."""
     vm_name = f"macbox-{uuid.uuid4().hex[:8]}"
     validate_vm_name(vm_name)
-    args = ["start", "--image", image, "--name", vm_name, "--json"]
+    args = ["start", "--name", vm_name]
+    if image:
+        args.extend(["--image", image])
+    if profile:
+        args.extend(["--profile", profile])
     if headless:
-        args.insert(-1, "--headless")
+        args.append("--headless")
+    else:
+        args.append("--no-headless")
+    args.append("--json")
+    return _run_macbox(*args)
+
+
+@mcp.tool()
+def create_warm_sandbox(image: str, headless: bool = True, profile: str | None = None) -> dict[str, Any]:
+    """Create a warm sandbox VM that stays running between tests."""
+    vm_name = f"macbox-warm-{uuid.uuid4().hex[:8]}"
+    validate_vm_name(vm_name)
+    args = ["warm", "--name", vm_name]
+    if image:
+        args.extend(["--image", image])
+    if profile:
+        args.extend(["--profile", profile])
+    if headless:
+        args.append("--headless")
+    else:
+        args.append("--no-headless")
+    args.append("--json")
+    return _run_macbox(*args)
+
+
+@mcp.tool()
+def run_on_warm_sandbox(vm_name: str, app_path: str, timeout_seconds: int = 120) -> dict[str, Any]:
+    """Upload a local .app to a warm VM and run the smoke test without recreating the sandbox."""
+    validate_vm_name(vm_name)
+    local = validate_upload_path(app_path, mcp_mode=True, allowed_suffixes=(".app",))
+    return _run_macbox(
+        "run-on-warm",
+        "--name",
+        vm_name,
+        "--app",
+        str(local),
+        "--timeout",
+        str(timeout_seconds),
+        "--json",
+    )
+
+
+@mcp.tool()
+def reset_warm_sandbox(vm_name: str, image: str | None = None, profile: str | None = None) -> dict[str, Any]:
+    """Reset a warm sandbox VM back to a clean state."""
+    validate_vm_name(vm_name)
+    args = ["reset-warm", "--name", vm_name]
+    if image:
+        args.extend(["--image", image])
+    if profile:
+        args.extend(["--profile", profile])
+    args.extend(["--headless", "--json"])
     return _run_macbox(*args)
 
 
@@ -88,8 +146,7 @@ def create_sandbox(image: str, headless: bool = True) -> dict[str, Any]:
 def upload_app(vm_name: str, app_path: str) -> dict[str, Any]:
     """Upload a .app bundle to the guest sandbox."""
     validate_vm_name(vm_name)
-    local = validate_upload_path(app_path, mcp_mode=True)
-    dest = _guest_dest_for_upload(local)
+    local = validate_upload_path(app_path, mcp_mode=True, allowed_suffixes=(".app",))
     return _run_macbox(
         "upload",
         "--name",
@@ -97,7 +154,7 @@ def upload_app(vm_name: str, app_path: str) -> dict[str, Any]:
         "--path",
         str(local),
         "--dest",
-        dest,
+        _guest_dest_for_upload(local),
         "--json",
     )
 
@@ -106,8 +163,7 @@ def upload_app(vm_name: str, app_path: str) -> dict[str, Any]:
 def upload_pkg(vm_name: str, pkg_path: str) -> dict[str, Any]:
     """Upload a .pkg installer to the guest sandbox."""
     validate_vm_name(vm_name)
-    local = validate_upload_path(pkg_path, mcp_mode=True)
-    dest = _guest_dest_for_upload(local)
+    local = validate_upload_path(pkg_path, mcp_mode=True, allowed_suffixes=(".pkg",))
     return _run_macbox(
         "upload",
         "--name",
@@ -115,23 +171,75 @@ def upload_pkg(vm_name: str, pkg_path: str) -> dict[str, Any]:
         "--path",
         str(local),
         "--dest",
-        dest,
+        _guest_dest_for_upload(local),
         "--json",
     )
 
 
 @mcp.tool()
-def run_app_smoke_test(
+def upload_dmg(vm_name: str, dmg_path: str) -> dict[str, Any]:
+    """Upload a .dmg release artifact to the guest sandbox."""
+    validate_vm_name(vm_name)
+    local = validate_upload_path(dmg_path, mcp_mode=True, allowed_suffixes=(".dmg",))
+    return _run_macbox(
+        "upload-dmg",
+        "--name",
+        vm_name,
+        "--path",
+        str(local),
+        "--dest",
+        _guest_dest_for_upload(local),
+        "--json",
+    )
+
+
+@mcp.tool()
+def mount_dmg_image(vm_name: str, guest_dmg_path: str) -> dict[str, Any]:
+    """Mount a DMG that already exists in the guest VM."""
+    validate_vm_name(vm_name)
+    return _run_macbox("mount-dmg", "--name", vm_name, "--dmg", guest_dmg_path, "--json")
+
+
+@mcp.tool()
+def install_dmg_guest_app(vm_name: str, app_name: str, guest_dmg_path: str | None = None) -> dict[str, Any]:
+    """Install an app bundle from a mounted or provided DMG inside the guest VM."""
+    validate_vm_name(vm_name)
+    args = ["install-dmg-app", "--name", vm_name, "--app", app_name]
+    if guest_dmg_path:
+        args.extend(["--dmg", guest_dmg_path])
+    args.append("--json")
+    return _run_macbox(*args)
+
+
+@mcp.tool()
+def install_guest_pkg(
     vm_name: str,
-    app_name: str,
-    timeout_seconds: int = 120,
+    guest_pkg_path: str,
+    app_name: str | None = None,
+    timeout_seconds: int = 600,
 ) -> dict[str, Any]:
+    """Install a guest pkg, validate the install, and optionally launch the installed app."""
+    validate_vm_name(vm_name)
+    args = [
+        "install-pkg",
+        "--name",
+        vm_name,
+        "--pkg",
+        guest_pkg_path,
+        "--timeout",
+        str(timeout_seconds),
+    ]
+    if app_name:
+        args.extend(["--app", app_name])
+    args.append("--json")
+    return _run_macbox(*args)
+
+
+@mcp.tool()
+def run_app_smoke_test(vm_name: str, app_name: str, timeout_seconds: int = 120) -> dict[str, Any]:
     """Launch an app in the guest VM and collect smoke-test evidence."""
     validate_vm_name(vm_name)
-    if not app_name.startswith("/"):
-        guest_app = f"/Users/admin/Desktop/{app_name}"
-    else:
-        guest_app = app_name
+    guest_app = app_name if app_name.startswith("/") else f"/Users/admin/Desktop/{app_name}"
     return _run_macbox(
         "run-app",
         "--name",
@@ -140,6 +248,47 @@ def run_app_smoke_test(
         guest_app,
         "--timeout",
         str(timeout_seconds),
+        "--json",
+    )
+
+
+@mcp.tool()
+def run_installed_guest_app(vm_name: str, app_name: str, timeout_seconds: int = 120) -> dict[str, Any]:
+    """Launch an installed app from /Applications in the guest VM."""
+    validate_vm_name(vm_name)
+    return _run_macbox(
+        "run-installed-app",
+        "--name",
+        vm_name,
+        "--app",
+        app_name,
+        "--timeout",
+        str(timeout_seconds),
+        "--json",
+    )
+
+
+@mcp.tool()
+def assert_window(vm_name: str, contains: str, app_name: str | None = None) -> dict[str, Any]:
+    """Verify that a guest app window title contains the expected text."""
+    validate_vm_name(vm_name)
+    args = ["assert-window", "--name", vm_name, "--contains", contains]
+    if app_name:
+        args.extend(["--app", app_name])
+    args.append("--json")
+    return _run_macbox(*args)
+
+
+@mcp.tool()
+def assert_app_running(vm_name: str, bundle_id: str) -> dict[str, Any]:
+    """Verify that a guest app identified by bundle ID is running."""
+    validate_vm_name(vm_name)
+    return _run_macbox(
+        "assert-app-running",
+        "--name",
+        vm_name,
+        "--bundle-id",
+        bundle_id,
         "--json",
     )
 
@@ -166,10 +315,87 @@ def collect_crashes(vm_name: str) -> dict[str, Any]:
 
 
 @mcp.tool()
-def reset_sandbox(image: str, vm_name: str) -> dict[str, Any]:
-    """Reset a sandbox VM from a base image."""
+def get_run_report(run_id: str) -> dict[str, Any]:
+    """Load the structured report for a previously recorded run."""
+    return _run_macbox("report", run_id, "--json")
+
+
+@mcp.tool()
+def run_release_gate(
+    artifact_path: str,
+    image: str,
+    requirements: str = "launch,no-crash,screenshot,no-new-crash-report",
+    app_name: str | None = None,
+    bundle_id: str | None = None,
+    window_contains: str | None = None,
+    timeout_seconds: int | None = None,
+    profile: str | None = None,
+) -> dict[str, Any]:
+    """Run a full release gate for a local .app, .dmg, or .pkg artifact."""
+    args = [
+        "gate",
+        "--artifact",
+        str(validate_upload_path(artifact_path, mcp_mode=True, allowed_suffixes=(".app", ".pkg", ".dmg"))),
+        "--image",
+        image,
+        "--requirements",
+        requirements,
+    ]
+    if app_name:
+        args.extend(["--app", app_name])
+    if bundle_id:
+        args.extend(["--bundle-id", bundle_id])
+    if window_contains:
+        args.extend(["--window-contains", window_contains])
+    if timeout_seconds is not None:
+        args.extend(["--timeout", str(timeout_seconds)])
+    if profile:
+        args.extend(["--profile", profile])
+    args.append("--json")
+    return _run_macbox(*args)
+
+
+@mcp.tool()
+def run_release_matrix(
+    artifact_path: str,
+    images: str,
+    requirements: str = "launch,no-crash,screenshot,no-new-crash-report",
+    app_name: str | None = None,
+    bundle_id: str | None = None,
+    window_contains: str | None = None,
+    timeout_seconds: int | None = None,
+) -> dict[str, Any]:
+    """Run a release artifact across multiple Tart images."""
+    args = [
+        "matrix",
+        "--artifact",
+        str(validate_upload_path(artifact_path, mcp_mode=True, allowed_suffixes=(".app", ".pkg", ".dmg"))),
+        "--images",
+        images,
+        "--requirements",
+        requirements,
+    ]
+    if app_name:
+        args.extend(["--app", app_name])
+    if bundle_id:
+        args.extend(["--bundle-id", bundle_id])
+    if window_contains:
+        args.extend(["--window-contains", window_contains])
+    if timeout_seconds is not None:
+        args.extend(["--timeout", str(timeout_seconds)])
+    args.append("--json")
+    return _run_macbox(*args)
+
+
+@mcp.tool()
+def reset_sandbox(image: str, vm_name: str, profile: str | None = None) -> dict[str, Any]:
+    """Reset a sandbox VM from a base image or profile."""
     validate_vm_name(vm_name)
-    return _run_macbox("reset", "--image", image, "--name", vm_name, "--json")
+    args = ["reset", "--name", vm_name, "--image", image, "--headless"]
+    if profile:
+        args.extend(["--profile", profile])
+    args.append("--json")
+    return _run_macbox(*args)
 
 
 @mcp.tool()

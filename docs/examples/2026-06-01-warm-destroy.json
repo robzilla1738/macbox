@@ -1,0 +1,10 @@
+{
+  "ok": true,
+  "command": "destroy",
+  "vm": "macbox-demo-warm",
+  "data": {
+    "destroyed": true
+  },
+  "warnings": [],
+  "errors": []
+}

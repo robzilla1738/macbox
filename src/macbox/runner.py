@@ -69,11 +69,13 @@ def start_background_command(
     try:
         return subprocess.Popen(
             list(argv),
+            stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
             text=True,
             env=None if env is None else dict(env),
             cwd=cwd,
+            start_new_session=True,
         )
     except OSError as exc:
         raise ProcessError(

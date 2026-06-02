@@ -1,0 +1,55 @@
+{
+  "ok": true,
+  "command": "gate",
+  "vm": "macbox-gate-91c4f01e",
+  "data": {
+    "vm": "macbox-gate-91c4f01e",
+    "image": "macos-sequoia-clean",
+    "run_id": "2026-06-02T02-04-06Z-macbox-gate-91c4f01e",
+    "run_dir": "/Users/robert/.macbox/runs/2026-06-02T02-04-06Z-macbox-gate-91c4f01e",
+    "artifact_path": "/Users/robert/Downloads/Clicky.dmg",
+    "artifact_type": ".dmg",
+    "destroyed": true,
+    "failed_requirements": [],
+    "report": {
+      "run_id": "2026-06-02T02-04-06Z-macbox-gate-91c4f01e",
+      "app": "Clicky.app",
+      "app_path": "/Applications/Clicky.app",
+      "image": "macos-sequoia-clean",
+      "profile": null,
+      "artifact_type": ".dmg",
+      "launched": true,
+      "crashed": false,
+      "verdict": "passed",
+      "reason": "passed",
+      "screenshot": "/Users/robert/.macbox/runs/2026-06-02T02-04-06Z-macbox-gate-91c4f01e/screenshots/launch.png",
+      "logs": "/Users/robert/.macbox/runs/2026-06-02T02-04-06Z-macbox-gate-91c4f01e/logs/system.log",
+      "crash_reports": [],
+      "warnings": [],
+      "assertions": [],
+      "crash_summary": null,
+      "artifacts_dir": "/Users/robert/.macbox/runs/2026-06-02T02-04-06Z-macbox-gate-91c4f01e",
+      "diagnosis": "No crash detected. App launched successfully.",
+      "next_actions": [
+        "Promote this artifact to the next validation stage."
+      ],
+      "report_path": "/Users/robert/.macbox/runs/2026-06-02T02-04-06Z-macbox-gate-91c4f01e/reports/report.json",
+      "mount_point": "/Volumes/Clicky",
+      "new_apps": [
+        "/Applications/Clicky.app"
+      ],
+      "gate": {
+        "requirements": [
+          "launch",
+          "no-crash",
+          "screenshot",
+          "no-new-crash-report"
+        ],
+        "failed_requirements": [],
+        "passed": true
+      }
+    }
+  },
+  "warnings": [],
+  "errors": []
+}

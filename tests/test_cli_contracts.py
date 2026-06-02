@@ -11,10 +11,11 @@ import pytest
 from click.testing import CliRunner
 
 from macbox.cli import main
-from macbox.errors import SafetyError
+from macbox.errors import AppCrashedError, SafetyError
 from macbox.models import GuestCommandResult
 from macbox.runner import ProcessResult
 from macbox.safety import validate_vm_name
+from macbox.workflows import GateResult
 
 
 def _load_macbox_mcp():
@@ -34,13 +35,21 @@ runner = CliRunner()
 
 def test_doctor_json_shape(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("MACBOX_STATE_DIR", str(tmp_path))
+    missing_key = tmp_path / "missing-macbox-id"
 
     def fake_run(argv, **kwargs):
         if argv[0] == "which":
             return ProcessResult(argv=list(argv), exit_code=0, stdout=f"/usr/bin/{argv[1]}", stderr="")
         return ProcessResult(argv=list(argv), exit_code=1, stdout="", stderr="missing")
 
-    with patch("macbox.cli.run_command", side_effect=fake_run):
+    def fake_expand(path):
+        if "macbox_id" in str(path):
+            return missing_key
+        return Path(str(path)).expanduser().resolve()
+
+    with patch("macbox.cli.run_command", side_effect=fake_run), patch(
+        "macbox.cli.expand_path", side_effect=fake_expand
+    ):
         result = runner.invoke(main, ["doctor", "--json"])
 
     assert result.exit_code == 1
@@ -115,25 +124,17 @@ def test_ssh_exec_uses_argument_array() -> None:
 def test_run_app_crash_json(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("MACBOX_STATE_DIR", str(tmp_path))
 
-    class FakeSession:
-        def remote_is_directory(self, path: str) -> bool:
-            return True
-
-        def exec(self, command: str, timeout: int):
-            return GuestCommandResult(exit_code=0, stdout="", stderr="")
-
-        def list_remote_files(self, remote_dir: str) -> list[str]:
-            if not hasattr(self, "called"):
-                self.called = True
-                return ["Old.crash"]
-            return ["Old.crash", "MyApp_2026.crash"]
-
-        def download(self, guest_path: str, local_path: Path) -> None:
-            Path(local_path).write_bytes(b"data")
-
-    with patch("macbox.cli._guest_session", return_value=FakeSession()), patch(
-        "macbox.cli.time.sleep", return_value=None
-    ):
+    with patch("macbox.cli.run_app_smoke", side_effect=AppCrashedError(
+        "The app crashed after launch.",
+        details={
+            "launched": True,
+            "crashed": True,
+            "app_path": "/Users/admin/Desktop/MyApp.app",
+            "screenshot": str(tmp_path / "shot.png"),
+            "logs": str(tmp_path / "log"),
+            "crash_reports": [str(tmp_path / "MyApp.crash")],
+        },
+    )):
         result = runner.invoke(
             main,
             [
@@ -152,3 +153,142 @@ def test_run_app_crash_json(tmp_path, monkeypatch) -> None:
     assert payload["ok"] is False
     assert payload["data"]["crashed"] is True
     assert payload["errors"][0]["code"] == "APP_CRASHED"
+
+
+def test_profiles_json_shape() -> None:
+    result = runner.invoke(main, ["profiles", "--json"])
+    assert result.exit_code == 0
+    payload = json.loads(result.output)
+    assert payload["ok"] is True
+    assert "profiles" in payload["data"]
+    assert "macos-sequoia-clean" in payload["data"]["profiles"]
+
+
+def test_report_command_reads_run_report(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("MACBOX_STATE_DIR", str(tmp_path))
+    run_id = "2026-06-02T00-00-00Z-macbox-test-001"
+    report_dir = tmp_path / "runs" / run_id / "reports"
+    report_dir.mkdir(parents=True)
+    (tmp_path / "runs" / run_id / "metadata.json").write_text(
+        json.dumps(
+            {
+                "run_id": run_id,
+                "vm": "macbox-test-001",
+                "image": "macos-sequoia-clean",
+                "created_at": "2026-06-02T00:00:00Z",
+                "status": "running",
+                "artifacts": {
+                    "screenshots": [],
+                    "logs": [],
+                    "crashes": [],
+                    "uploads": [],
+                    "reports": [],
+                    "diagnostics": [],
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    (report_dir / "report.json").write_text(
+        json.dumps({"run_id": run_id, "verdict": "passed"}),
+        encoding="utf-8",
+    )
+
+    result = runner.invoke(main, ["report", run_id, "--json"])
+
+    assert result.exit_code == 0
+    payload = json.loads(result.output)
+    assert payload["data"]["run_id"] == run_id
+    assert payload["data"]["verdict"] == "passed"
+
+
+def test_gate_json_shape(tmp_path, monkeypatch) -> None:
+    app = tmp_path / "Demo.app"
+    app.mkdir()
+    gate_result = GateResult(
+        ok=True,
+        vm="macbox-gate-001",
+        image="macos-sequoia-clean",
+        run_id="run-id",
+        run_dir=str(tmp_path / "run"),
+        artifact_path=str(app),
+        artifact_type=".app",
+        report={"run_id": "run-id", "verdict": "passed", "report_path": str(tmp_path / "report.json")},
+        failed_requirements=[],
+        destroyed=True,
+        warnings=[],
+        errors=[],
+    )
+    with patch("macbox.cli.run_release_gate", return_value=gate_result):
+        result = runner.invoke(main, ["gate", "--artifact", str(app), "--json"])
+
+    assert result.exit_code == 0
+    payload = json.loads(result.output)
+    assert payload["ok"] is True
+    assert payload["data"]["artifact_type"] == ".app"
+    assert payload["data"]["report"]["verdict"] == "passed"
+
+
+def test_matrix_json_shape(tmp_path) -> None:
+    app = tmp_path / "Demo.app"
+    app.mkdir()
+    with patch("macbox.cli.run_matrix", return_value=(False, [])):
+        result = runner.invoke(
+            main,
+            [
+                "matrix",
+                "--images",
+                "macos-sequoia-clean,macos-sonoma-clean",
+                "--artifact",
+                str(app),
+                "--json",
+            ],
+        )
+
+    assert result.exit_code == 1
+    payload = json.loads(result.output)
+    assert payload["ok"] is False
+    assert payload["command"] == "matrix"
+
+
+def test_run_on_warm_json_shape(tmp_path) -> None:
+    app = tmp_path / "Demo.app"
+    app.mkdir()
+    with patch(
+        "macbox.cli.run_on_warm",
+        return_value=type(
+            "WarmResult",
+            (),
+            {
+                "upload": type(
+                    "Upload",
+                    (),
+                    {
+                        "local_path": str(app),
+                        "guest_path": "/Users/admin/Desktop/Demo.app",
+                    },
+                )(),
+                "smoke": type(
+                    "Smoke",
+                    (),
+                    {
+                        "launched": True,
+                        "crashed": False,
+                        "app_path": "/Users/admin/Desktop/Demo.app",
+                        "screenshot": str(tmp_path / "shot.png"),
+                        "logs": str(tmp_path / "system.log"),
+                        "crash_reports": [],
+                        "report": {"run_id": "run-id", "verdict": "passed"},
+                        "warnings": [],
+                    },
+                )(),
+            },
+        )(),
+    ):
+        result = runner.invoke(main, ["run-on-warm", "--name", "macbox-warm-001", "--app", str(app), "--json"])
+
+    assert result.exit_code == 0
+    payload = json.loads(result.output)
+    assert payload["ok"] is True
+    assert payload["command"] == "run-on-warm"
+    assert payload["data"]["report"]["verdict"] == "passed"

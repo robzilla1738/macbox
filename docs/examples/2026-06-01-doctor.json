@@ -1,0 +1,36 @@
+{
+  "ok": true,
+  "command": "doctor",
+  "vm": null,
+  "data": {
+    "checks": [
+      {
+        "name": "tart",
+        "ok": true,
+        "message": "/opt/homebrew/bin/tart"
+      },
+      {
+        "name": "ssh",
+        "ok": true,
+        "message": "/usr/bin/ssh"
+      },
+      {
+        "name": "scp",
+        "ok": true,
+        "message": "/usr/bin/scp"
+      },
+      {
+        "name": "ssh_identity",
+        "ok": true,
+        "message": "/Users/robert/.ssh/macbox_id"
+      },
+      {
+        "name": "state_dir",
+        "ok": true,
+        "message": "/Users/robert/.macbox"
+      }
+    ]
+  },
+  "warnings": [],
+  "errors": []
+}

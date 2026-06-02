@@ -1,0 +1,14 @@
+{
+  "ok": true,
+  "command": "start",
+  "vm": "macbox-demo-pkg",
+  "data": {
+    "image": "macos-sequoia-clean",
+    "profile": null,
+    "headless": true,
+    "run_id": "2026-06-02T02-04-49Z-macbox-demo-pkg",
+    "run_dir": "/Users/robert/.macbox/runs/2026-06-02T02-04-49Z-macbox-demo-pkg"
+  },
+  "warnings": [],
+  "errors": []
+}

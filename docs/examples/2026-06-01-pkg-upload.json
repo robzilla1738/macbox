@@ -1,0 +1,12 @@
+{
+  "ok": true,
+  "command": "upload",
+  "vm": "macbox-demo-pkg",
+  "data": {
+    "local_path": "/private/tmp/macbox-demo-artifacts/Amphetamine.pkg",
+    "guest_path": "/Users/admin/Desktop/Amphetamine.pkg",
+    "artifact_type": ".pkg"
+  },
+  "warnings": [],
+  "errors": []
+}

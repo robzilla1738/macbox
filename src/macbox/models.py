@@ -34,6 +34,7 @@ class MacboxConfig(BaseModel):
     tart_path: str = "tart"
     run_app_timeout_seconds: int = 120
     log_collect_duration: str = "5m"
+    profiles: dict[str, dict[str, Any]] = Field(default_factory=dict)
 
 
 class RunArtifacts(BaseModel):
@@ -41,6 +42,8 @@ class RunArtifacts(BaseModel):
     logs: list[str] = Field(default_factory=list)
     crashes: list[str] = Field(default_factory=list)
     uploads: list[str] = Field(default_factory=list)
+    reports: list[str] = Field(default_factory=list)
+    diagnostics: list[str] = Field(default_factory=list)
 
 
 class RunMetadata(BaseModel):

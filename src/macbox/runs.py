@@ -39,7 +39,7 @@ class RunManager:
         )
         run_dir = self.run_dir(run_id)
         run_dir.mkdir(parents=True, exist_ok=True)
-        for sub in ("screenshots", "logs", "crashes", "uploads"):
+        for sub in ("screenshots", "logs", "crashes", "uploads", "reports", "diagnostics"):
             (run_dir / sub).mkdir(exist_ok=True)
         self.write_metadata(metadata)
         self._active[vm] = metadata
@@ -101,7 +101,7 @@ class RunManager:
 
     def artifact_path(self, vm: str, kind: str, filename: str) -> Path:
         metadata = self.get_or_create_run(vm)
-        allowed = {"screenshots", "logs", "crashes", "uploads"}
+        allowed = {"screenshots", "logs", "crashes", "uploads", "reports", "diagnostics"}
         if kind not in allowed:
             raise RunError(
                 f"Unknown artifact kind: {kind}",
@@ -126,6 +126,8 @@ class RunManager:
             "logs": metadata.artifacts.logs,
             "crashes": metadata.artifacts.crashes,
             "uploads": metadata.artifacts.uploads,
+            "reports": metadata.artifacts.reports,
+            "diagnostics": metadata.artifacts.diagnostics,
         }
         serialized = str(path)
         bucket = key_map[kind]

@@ -1,0 +1,14 @@
+{
+  "ok": true,
+  "command": "reset-warm",
+  "vm": "macbox-demo-warm",
+  "data": {
+    "image": "macos-sequoia-clean",
+    "profile": null,
+    "run_id": "2026-06-02T02-07-56Z-macbox-demo-warm",
+    "run_dir": "/Users/robert/.macbox/runs/2026-06-02T02-07-56Z-macbox-demo-warm",
+    "warm": true
+  },
+  "warnings": [],
+  "errors": []
+}

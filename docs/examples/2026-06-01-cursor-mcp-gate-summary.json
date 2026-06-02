@@ -1,0 +1,21 @@
+{
+  "client": "Cursor",
+  "workspace": "/Users/robert/Code/macbox",
+  "mcp_server": "user-macbox",
+  "tool": "run_release_gate",
+  "artifact_path": "/Applications/Amphetamine.app",
+  "image": "macos-sequoia-clean",
+  "requirements": "launch,no-crash,screenshot,no-new-crash-report",
+  "verdict": "passed",
+  "run_id": "2026-06-02T02-10-52Z-macbox-gate-0419fa04",
+  "report_path": "/Users/robert/.macbox/runs/2026-06-02T02-10-52Z-macbox-gate-0419fa04/reports/report.json",
+  "screenshot": "/Users/robert/.macbox/runs/2026-06-02T02-10-52Z-macbox-gate-0419fa04/screenshots/launch.png",
+  "logs": "/Users/robert/.macbox/runs/2026-06-02T02-10-52Z-macbox-gate-0419fa04/logs/system.log",
+  "crash_summary": "none",
+  "crash_reports": [],
+  "run_dir": "/Users/robert/.macbox/runs/2026-06-02T02-10-52Z-macbox-gate-0419fa04",
+  "notes": [
+    "Cursor launched the macbox MCP server and executed the Run Release Gate tool successfully.",
+    "The Cursor agent inspected local MCP descriptor files and ran macbox_status before invoking run_release_gate, so this is not a pure no-shell proof."
+  ]
+}

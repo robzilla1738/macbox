@@ -1,0 +1,47 @@
+{
+  "ok": true,
+  "command": "demo",
+  "vm": "macbox-demo-63e3c5bd",
+  "data": {
+    "vm": "macbox-demo-63e3c5bd",
+    "image": "macos-sequoia-clean",
+    "run_id": "2026-06-02T02-03-37Z-macbox-demo-63e3c5bd",
+    "run_dir": "/Users/robert/.macbox/runs/2026-06-02T02-03-37Z-macbox-demo-63e3c5bd",
+    "local_app": "/Applications/Amphetamine.app",
+    "guest_app": "/Users/admin/Desktop/Amphetamine.app",
+    "launched": true,
+    "crashed": false,
+    "destroyed": true,
+    "artifacts": {
+      "screenshot": "/Users/robert/.macbox/runs/2026-06-02T02-03-37Z-macbox-demo-63e3c5bd/screenshots/launch.png",
+      "logs": "/Users/robert/.macbox/runs/2026-06-02T02-03-37Z-macbox-demo-63e3c5bd/logs/system.log",
+      "crash_reports": []
+    },
+    "report": {
+      "run_id": "2026-06-02T02-03-37Z-macbox-demo-63e3c5bd",
+      "app": "Amphetamine.app",
+      "app_path": "/Users/admin/Desktop/Amphetamine.app",
+      "image": "macos-sequoia-clean",
+      "profile": null,
+      "artifact_type": ".app",
+      "launched": true,
+      "crashed": false,
+      "verdict": "passed",
+      "reason": "passed",
+      "screenshot": "/Users/robert/.macbox/runs/2026-06-02T02-03-37Z-macbox-demo-63e3c5bd/screenshots/launch.png",
+      "logs": "/Users/robert/.macbox/runs/2026-06-02T02-03-37Z-macbox-demo-63e3c5bd/logs/system.log",
+      "crash_reports": [],
+      "warnings": [],
+      "assertions": [],
+      "crash_summary": null,
+      "artifacts_dir": "/Users/robert/.macbox/runs/2026-06-02T02-03-37Z-macbox-demo-63e3c5bd",
+      "diagnosis": "No crash detected. App launched successfully.",
+      "next_actions": [
+        "Promote this artifact to the next validation stage."
+      ],
+      "report_path": "/Users/robert/.macbox/runs/2026-06-02T02-03-37Z-macbox-demo-63e3c5bd/reports/report.json"
+    }
+  },
+  "warnings": [],
+  "errors": []
+}

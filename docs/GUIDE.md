@@ -1,6 +1,6 @@
 # macbox guide
 
-This is the practical walkthrough: install, prepare a template VM, run tests from the CLI or MCP, read artifacts, fix common problems.
+This is the practical walkthrough: install, prepare a template VM, run `.app` / `.dmg` / `.pkg` tests from the CLI or MCP, read artifacts and reports, and fix common problems.
 
 ## What macbox is (and is not)
 
@@ -107,6 +107,23 @@ macbox doctor --json
 
 All checks should pass. `"ok": true` means you are ready to spawn sandboxes.
 
+## One-command demo
+
+```bash
+macbox demo --app /Applications/Amphetamine.app --image macos-sequoia-clean --json
+```
+
+Or:
+
+```bash
+./scripts/demo.sh
+./scripts/demo.sh /path/to/YourApp.app
+```
+
+Runs start, upload, smoke test, and destroy in one shot. Prints artifact paths in JSON.
+
+Cursor MCP setup: [CURSOR.md](CURSOR.md).
+
 ## Config
 
 macbox writes `~/.macbox/config.json` on first run. Defaults:
@@ -119,7 +136,8 @@ macbox writes `~/.macbox/config.json` on first run. Defaults:
   "default_image": "macos-sequoia-clean",
   "protected_images": ["macos-sequoia-clean"],
   "run_app_timeout_seconds": 120,
-  "log_collect_duration": "5m"
+  "log_collect_duration": "5m",
+  "profiles": {}
 }
 ```
 
@@ -130,6 +148,8 @@ Override state dir for tests:
 ```bash
 export MACBOX_STATE_DIR=/tmp/macbox-test
 ```
+
+You can add named profiles under `profiles` if your local Tart template names differ from the built-ins.
 
 ## CLI workflow
 
@@ -162,6 +182,13 @@ Rules:
 
 Save `run_id` and `run_dir` from the JSON response.
 
+Named profiles can be used anywhere an image can be used:
+
+```bash
+macbox profiles --json
+macbox start --profile macos-sequoia-dark-mode --name macbox-dark-001 --json
+```
+
 ### Upload a build
 
 ```bash
@@ -172,7 +199,7 @@ macbox upload \
   --json
 ```
 
-Uploads must be `.app` bundles or `.pkg` files. macbox blocks obvious secret paths unless you pass `--allow-secret-path` (CLI only, not MCP).
+Uploads must be `.app` bundles, `.dmg` images, or `.pkg` files. macbox blocks obvious secret paths.
 
 ### Run a smoke test
 
@@ -203,6 +230,120 @@ Response `data` fields:
 | `crash_reports` | List of downloaded crash files |
 
 Artifacts live under `~/.macbox/runs/<run_id>/`.
+
+Every launch also writes `~/.macbox/runs/<run_id>/reports/report.json`. Read it directly or through:
+
+```bash
+macbox report <run_id> --json
+```
+
+The report is the agent-facing summary. It includes verdict, reason, diagnosis, next actions, and crash-summary fields when available.
+
+### Validate a DMG release artifact
+
+```bash
+macbox upload-dmg \
+  --name macbox-test-001 \
+  --path ./release/MyApp.dmg \
+  --json
+
+macbox mount-dmg \
+  --name macbox-test-001 \
+  --dmg /Users/admin/Desktop/MyApp.dmg \
+  --json
+
+macbox install-dmg-app \
+  --name macbox-test-001 \
+  --app MyApp.app \
+  --json
+
+macbox run-installed-app \
+  --name macbox-test-001 \
+  --app MyApp.app \
+  --timeout 120 \
+  --json
+```
+
+### Validate a PKG release artifact
+
+```bash
+macbox upload \
+  --name macbox-test-001 \
+  --path ./release/MyApp.pkg \
+  --json
+
+macbox install-pkg \
+  --name macbox-test-001 \
+  --pkg /Users/admin/Desktop/MyApp.pkg \
+  --app MyApp.app \
+  --timeout 600 \
+  --json
+```
+
+`install-pkg` records:
+
+- installer exit code
+- new apps in `/Applications`
+- new LaunchAgents and LaunchDaemons
+- postinstall log artifact
+- installed files per detected package ID when available
+- launch/crash evidence if an installed app is launched
+
+`sudo -n installer ...` is used inside the guest. If your template requires an interactive sudo password, package installs will fail until that guest image is configured for non-interactive admin installs.
+
+### UI assertions
+
+Use assertions after launch when you need more than "did it crash":
+
+```bash
+macbox assert-window --name macbox-test-001 --contains Welcome --json
+macbox assert-app-running --name macbox-test-001 --bundle-id com.example.MyApp --json
+```
+
+### Warm VM loop
+
+For faster iterative testing:
+
+```bash
+macbox warm --image macos-sequoia-clean --name macbox-warm-sequoia --json
+macbox run-on-warm --name macbox-warm-sequoia --app ./dist/MyApp.app --json
+macbox reset-warm --image macos-sequoia-clean --name macbox-warm-sequoia --json
+macbox destroy --name macbox-warm-sequoia --json
+```
+
+### Release gate and matrix
+
+Gate mode gives you a single pass/fail decision with structured evidence:
+
+```bash
+macbox gate \
+  --image macos-sequoia-clean \
+  --artifact ./release/MyApp.dmg \
+  --app MyApp.app \
+  --requirements launch,no-crash,screenshot,no-new-crash-report \
+  --json
+```
+
+Supported requirements:
+
+- `launch`
+- `no-crash`
+- `screenshot`
+- `no-new-crash-report`
+- `app-running`
+- `window:<text>`
+
+`app-running` requires `--bundle-id`.
+
+For multi-image validation:
+
+```bash
+macbox matrix \
+  --images macos-sequoia-clean,macos-sonoma-clean,macos-ventura-clean \
+  --artifact ./release/MyApp.dmg \
+  --app MyApp.app \
+  --json
+```
 
 ### Extra evidence
 
@@ -250,13 +391,26 @@ Use the venv Python so `macbox` and `mcp` are on the path.
 | `macbox_status` | Host + Tart readiness |
 | `list_images` | Local Tart VMs (same as CLI `images`) |
 | `create_sandbox` | `start` with auto-generated `macbox-<id>` name |
+| `create_warm_sandbox` | Start a reusable warm VM |
+| `run_on_warm_sandbox` | Upload a local `.app` to a warm VM and smoke-test it |
 | `upload_app` | Upload `.app` to guest Desktop |
+| `upload_dmg` | Upload `.dmg` to guest Desktop |
 | `upload_pkg` | Upload `.pkg` to guest Desktop |
+| `mount_dmg_image` | Mount a guest DMG |
+| `install_dmg_guest_app` | Copy an app from a DMG into `/Applications` |
+| `install_guest_pkg` | Run installer validation for a guest `.pkg` |
 | `run_app_smoke_test` | Launch app and collect evidence |
+| `run_installed_guest_app` | Launch an app from `/Applications` |
+| `assert_window` | Check a guest window title |
+| `assert_app_running` | Check a running app by bundle ID |
 | `collect_logs` | Recent guest syslog |
 | `take_screenshot` | Guest screen capture |
 | `collect_crashes` | DiagnosticReports from guest |
+| `get_run_report` | Load a prior structured run report |
+| `run_release_gate` | One-shot pass/fail validation for `.app` / `.dmg` / `.pkg` |
+| `run_release_matrix` | Run the same artifact across multiple images |
 | `reset_sandbox` | Stop, delete, re-clone, start |
+| `reset_warm_sandbox` | Reset a warm sandbox in place |
 | `destroy_sandbox` | Stop and delete sandbox |
 
 MCP calls the `macbox` CLI with fixed argument arrays. No raw Tart. No host shell.
@@ -306,7 +460,7 @@ Failure shape:
 }
 ```
 
-Common error codes: `SAFETY_ERROR`, `TART_ERROR`, `SSH_ERROR`, `VM_NOT_READY`, `APP_CRASHED`, `APP_ERROR`.
+Common error codes: `SAFETY_ERROR`, `TART_ERROR`, `SSH_ERROR`, `VM_NOT_READY`, `APP_CRASHED`, `APP_ERROR`, `RUN_ERROR`.
 
 ## Troubleshooting
 
@@ -318,7 +472,7 @@ Common error codes: `SAFETY_ERROR`, `TART_ERROR`, `SSH_ERROR`, `VM_NOT_READY`, `
 | SSH `Permission denied` | Re-run `ssh-copy-id`; check Remote Login |
 | `SAFETY_ERROR` on destroy | You tried to delete a protected template name |
 | `SAFETY_ERROR` on start | Sandbox name equals base image name; pick a different `--name` |
-| Upload rejected | Path must be `.app` or `.pkg`; not a secret directory |
+| Upload rejected | Path must be `.app`, `.dmg`, or `.pkg`; not a secret directory |
 | Blank screenshot | Common in headless mode; rely on logs/crashes |
 | `tart list` shows ghcr.io rows | Normal cache entries; use local `macos-sequoia-clean` |
 

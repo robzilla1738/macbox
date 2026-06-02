@@ -13,6 +13,8 @@ def test_run_directory_created_under_state_dir(tmp_path, monkeypatch) -> None:
     assert (run_dir / "screenshots").is_dir()
     assert (run_dir / "logs").is_dir()
     assert (run_dir / "crashes").is_dir()
+    assert (run_dir / "reports").is_dir()
+    assert (run_dir / "diagnostics").is_dir()
     assert (run_dir / "metadata.json").is_file()
 
 

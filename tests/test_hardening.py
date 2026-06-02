@@ -63,6 +63,19 @@ def test_run_command_uses_argument_array() -> None:
     assert mock_run.call_args.args[0] == ["echo", "hi"]
 
 
+def test_start_background_command_detaches_session() -> None:
+    with patch("macbox.runner.subprocess.Popen") as mock_popen:
+        from macbox.runner import start_background_command
+
+        start_background_command(["tart", "run", "--no-graphics", "macbox-test-001"])
+
+    mock_popen.assert_called_once()
+    assert mock_popen.call_args.kwargs["stdin"] == subprocess.DEVNULL
+    assert mock_popen.call_args.kwargs["stdout"] == subprocess.DEVNULL
+    assert mock_popen.call_args.kwargs["stderr"] == subprocess.DEVNULL
+    assert mock_popen.call_args.kwargs["start_new_session"] is True
+
+
 def test_error_details_redact_secrets() -> None:
     err = TartError(
         "failed",
@@ -155,13 +168,26 @@ def test_mcp_has_no_host_exec_tool() -> None:
         "macbox_status",
         "list_images",
         "create_sandbox",
+        "create_warm_sandbox",
         "upload_app",
+        "upload_dmg",
         "upload_pkg",
+        "mount_dmg_image",
+        "install_dmg_guest_app",
+        "install_guest_pkg",
         "run_app_smoke_test",
+        "run_installed_guest_app",
+        "run_on_warm_sandbox",
+        "assert_window",
+        "assert_app_running",
         "collect_logs",
         "take_screenshot",
         "collect_crashes",
+        "get_run_report",
+        "run_release_gate",
+        "run_release_matrix",
         "reset_sandbox",
+        "reset_warm_sandbox",
         "destroy_sandbox",
     }
     assert public_tools.issubset(tool_names)
@@ -178,6 +204,22 @@ def test_mcp_upload_rejects_secret_and_unsupported(tmp_path) -> None:
     txt.write_text("x", encoding="utf-8")
     with pytest.raises(MacboxError):
         macbox_mcp.upload_app("macbox-abcd1234", str(txt))
+
+
+def test_mcp_upload_dmg_builds_argv(tmp_path, monkeypatch) -> None:
+    macbox_mcp = _load_macbox_mcp()
+    dmg = tmp_path / "MyApp.dmg"
+    dmg.write_bytes(b"dmg")
+    captured: dict[str, list[str]] = {}
+
+    def fake_run_macbox(*args: str):
+        captured["args"] = list(args)
+        return {"ok": True, "command": "upload-dmg", "vm": "macbox-abcd1234", "data": {}, "warnings": [], "errors": []}
+
+    monkeypatch.setattr(macbox_mcp, "_run_macbox", fake_run_macbox)
+    macbox_mcp.upload_dmg("macbox-abcd1234", str(dmg))
+    assert captured["args"][:2] == ["upload-dmg", "--name"]
+    assert captured["args"][captured["args"].index("--path") + 1] == str(dmg.resolve())
 
 
 def test_ssh_batchmode_enabled() -> None:

@@ -37,7 +37,7 @@ def test_allow_override_for_secrets(tmp_path) -> None:
         validate_upload_path(secret_file, allow_override=True)
 
 
-def test_mcp_upload_requires_app_or_pkg(tmp_path) -> None:
+def test_mcp_upload_requires_supported_artifact(tmp_path) -> None:
     txt = tmp_path / "notes.txt"
     txt.write_text("hello", encoding="utf-8")
     with pytest.raises(SafetyError):
@@ -50,6 +50,10 @@ def test_mcp_upload_requires_app_or_pkg(tmp_path) -> None:
     pkg = tmp_path / "MyApp.pkg"
     pkg.write_bytes(b"pkg")
     assert validate_upload_path(pkg, mcp_mode=True) == pkg.resolve()
+
+    dmg = tmp_path / "MyApp.dmg"
+    dmg.write_bytes(b"dmg")
+    assert validate_upload_path(dmg, mcp_mode=True) == dmg.resolve()
 
 
 def test_reject_ssh_directory(tmp_path) -> None:
