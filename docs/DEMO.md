@@ -1,6 +1,6 @@
 # macbox demo
 
-This file freezes the current working baseline and points to the exact successful outputs captured on June 1, 2026.
+This file records the working baseline and the exact successful outputs captured on June 1, 2026.
 
 ## Baseline
 
@@ -25,7 +25,7 @@ This file freezes the current working baseline and points to the exact successfu
 - Matrix flow: [2026-06-01-matrix-amphetamine.json](/Users/robert/Code/macbox/docs/examples/2026-06-01-matrix-amphetamine.json)
 - Cursor MCP gate summary: [2026-06-01-cursor-mcp-gate-summary.json](/Users/robert/Code/macbox/docs/examples/2026-06-01-cursor-mcp-gate-summary.json)
 
-## Exact demo path
+## Demo path
 
 ### 1. Amphetamine.app
 
@@ -36,7 +36,7 @@ cd /Users/robert/Code/macbox
 macbox demo --app /Applications/Amphetamine.app --image macos-sequoia-clean --timeout 10 --json
 ```
 
-Observed result:
+Result:
 - verdict: `passed`
 - run id: `2026-06-02T02-03-37Z-macbox-demo-63e3c5bd`
 - report: [report.json](/Users/robert/.macbox/runs/2026-06-02T02-03-37Z-macbox-demo-63e3c5bd/reports/report.json)
@@ -52,7 +52,7 @@ cd /Users/robert/Code/macbox
 macbox gate --image macos-sequoia-clean --artifact /Users/robert/Downloads/Clicky.dmg --app Clicky.app --timeout 10 --json
 ```
 
-Observed result:
+Result:
 - verdict: `passed`
 - run id: `2026-06-02T02-04-06Z-macbox-gate-91c4f01e`
 - report: [report.json](/Users/robert/.macbox/runs/2026-06-02T02-04-06Z-macbox-gate-91c4f01e/reports/report.json)
@@ -79,7 +79,7 @@ macbox install-pkg --name macbox-demo-pkg --pkg /Users/admin/Desktop/Amphetamine
 macbox destroy --name macbox-demo-pkg --json
 ```
 
-Observed result:
+Result:
 - verdict: `passed`
 - run id: `2026-06-02T02-04-49Z-macbox-demo-pkg`
 - report: [report.json](/Users/robert/.macbox/runs/2026-06-02T02-04-49Z-macbox-demo-pkg/reports/report.json)
@@ -98,7 +98,7 @@ macbox reset-warm --image macos-sequoia-clean --name macbox-demo-warm --headless
 macbox destroy --name macbox-demo-warm --json
 ```
 
-Observed result:
+Result:
 - warm run verdict: `passed`
 - run id: `2026-06-02T02-07-12Z-macbox-demo-warm`
 - report: [report.json](/Users/robert/.macbox/runs/2026-06-02T02-07-12Z-macbox-demo-warm/reports/report.json)
@@ -115,7 +115,7 @@ cd /Users/robert/Code/macbox
 macbox matrix --images macos-sequoia-clean --artifact /Applications/Amphetamine.app --timeout 10 --json
 ```
 
-Observed result:
+Result:
 - matrix verdict: `passed`
 - image: `macos-sequoia-clean`
 - per-image report: [report.json](/Users/robert/.macbox/runs/2026-06-02T02-08-11Z-macbox-gate-490e4114/reports/report.json)
@@ -130,12 +130,12 @@ Use the macbox MCP tools only. Do not run shell commands.
 Create a macOS sandbox from macos-sequoia-clean, run a gate test for /Applications/Amphetamine.app, collect the report, screenshot, logs, crash summary, and destroy the sandbox. Return only the verdict and artifact paths.
 ```
 
-What actually happened:
+What happened in Cursor:
 - Cursor loaded the `user-macbox` MCP server and executed `Run Release Gate in macbox`
 - Cursor also inspected local MCP descriptor files and ran `macbox_status` before the gate call
 - Cursor returned a passed verdict with artifact paths
 
-Observed Cursor MCP result:
+Result:
 - verdict: `passed`
 - run id: `2026-06-02T02-10-52Z-macbox-gate-0419fa04`
 - report: [report.json](/Users/robert/.macbox/runs/2026-06-02T02-10-52Z-macbox-gate-0419fa04/reports/report.json)
@@ -154,8 +154,8 @@ The current boundary is still the right one:
 
 ## Next important validation
 
-The next high-value stabilization check is not another feature. It is a stricter IDE-agent proof:
+The next step is a stricter IDE-agent check:
 
 1. start a fresh Cursor or Codex agent session with `user-macbox` already loaded
-2. verify it goes straight to MCP tool calls without local shell/file inspection
-3. repeat the same gate on a second local template image so `matrix` covers a true multi-image path instead of a single-image pass-through
+2. verify it goes straight to MCP tool calls without local shell or file inspection
+3. repeat the same gate on a second local template image so `matrix` covers a real multi-image path instead of a single-image pass-through

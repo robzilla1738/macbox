@@ -1,16 +1,16 @@
 # macbox
 
-**A local, MCP-compatible macOS app testing sandbox.**
+macbox is a local macOS app testing sandbox for Apple Silicon Macs.
 
-An AI IDE can upload a real `.app`, `.dmg`, or `.pkg` into a disposable macOS VM, launch it, validate install flows, and pull back screenshots, logs, crash reports, and a structured verdict — then tear the VM down. Everything runs on your Apple Silicon Mac via [Tart](https://tart.run/). No cloud. No remote workers. No billing.
+It lets an IDE agent or a shell workflow upload a real `.app`, `.dmg`, or `.pkg` into a disposable Tart VM, launch it, check the install path, collect screenshots/logs/crash reports, and return structured JSON. Everything runs on your own machine.
 
 macbox is a CLI plus an optional MCP stdio server for Cursor, Claude Code, and other MCP clients. It wraps Tart so agents get structured JSON instead of parsing VM output by hand.
 
 ## Why it exists
 
-You built a macOS app. You want an agent to verify it launches in a clean environment — without you SSH-ing into a VM, copying files, and remembering to delete it.
+Testing a macOS build in a clean environment is annoying if you have to manage the VM yourself.
 
-macbox automates that loop: disposable VM → upload/install → launch → evidence → verdict → destroy. JSON in, JSON out.
+macbox handles that loop for you: create a disposable VM, copy in the artifact, run it, collect evidence, write a report, and clean up.
 
 ## What you get
 
@@ -20,7 +20,8 @@ macbox automates that loop: disposable VM → upload/install → launch → evid
 - **Structured reports** via `macbox report <run_id>` for agent repair loops
 - **Release gates** for `.app`, `.dmg`, and `.pkg` artifacts
 - **Matrix testing** and **warm VM** flows for repeat validation
-- **Protected base templates** so `destroy` cannot wipe your golden image
+- **Composable guest-control tools** for app launch, guest shell, AppleScript, windows, and processes
+- **Protected base templates** so `destroy` cannot wipe your base image
 
 ## Quick start
 
@@ -48,7 +49,7 @@ You want `"ok": true`. Full setup is in [docs/GUIDE.md](docs/GUIDE.md).
 
 ## Demo in one command
 
-After setup, show the full loop:
+After setup, this runs the standard path end to end:
 
 ```bash
 macbox demo --app /Applications/Amphetamine.app --image macos-sequoia-clean --json
@@ -62,7 +63,7 @@ chmod +x scripts/demo.sh
 ./scripts/demo.sh /Applications/Calculator.app
 ```
 
-This starts a disposable VM, uploads the app, runs a smoke test, saves artifacts under `~/.macbox/runs/`, destroys the VM, and prints paths in JSON.
+This starts a disposable VM, uploads the app, runs a smoke test, saves artifacts under `~/.macbox/runs/`, destroys the VM, and prints the paths as JSON.
 
 ## Example: smoke-test an app (step by step)
 
@@ -77,7 +78,7 @@ macbox destroy --name macbox-test-001 --json
 
 ## Structured report
 
-Every smoke test and release gate writes a single machine-friendly verdict:
+Every smoke test and release gate writes a single structured verdict:
 
 ```bash
 macbox report 2026-06-02T00-00-00Z-macbox-test-001 --json
@@ -87,7 +88,7 @@ The report includes launch state, crash state, screenshot/log/crash artifact pat
 
 ## Release artifacts
 
-macbox now supports the artifact shapes users actually receive:
+macbox supports the artifact types you usually ship or download:
 
 ```bash
 macbox upload-dmg --name macbox-test-001 --path ./dist/MyApp.dmg --json
@@ -103,7 +104,7 @@ macbox install-pkg --name macbox-test-001 --pkg /Users/admin/Desktop/MyApp.pkg -
 
 ## Release gate and matrix
 
-One-shot pass/fail gates are now first-class:
+Use `gate` when you want a single pass/fail result:
 
 ```bash
 macbox gate \
@@ -114,7 +115,7 @@ macbox gate \
   --json
 ```
 
-Matrix testing fans the same artifact across multiple templates:
+Use `matrix` when you want to run the same artifact against multiple templates:
 
 ```bash
 macbox matrix \
@@ -138,7 +139,7 @@ Built-in profiles are available through `macbox profiles --json`, including `mac
 
 ## MCP for AI IDEs
 
-This is the main use case: point Cursor, Claude Code, or any MCP client at the local server and let the agent drive the sandbox.
+If you want an IDE agent to drive the sandbox, point Cursor, Claude Code, or another MCP client at the local server:
 
 ```json
 {
@@ -151,27 +152,33 @@ This is the main use case: point Cursor, Claude Code, or any MCP client at the l
 }
 ```
 
-Tools include `create_sandbox`, `create_warm_sandbox`, `run_on_warm_sandbox`, `upload_app`, `upload_dmg`, `install_guest_pkg`, `run_app_smoke_test`, `run_release_gate`, `run_release_matrix`, `get_run_report`, and the evidence helpers. They call the CLI internally. They do not expose raw Tart or arbitrary host commands.
+Tools include `create_sandbox`, `create_warm_sandbox`, `run_on_warm_sandbox`, `upload_app`, `upload_dmg`, `install_guest_pkg`, `run_app_smoke_test`, `run_release_gate`, `run_release_matrix`, `get_run_report`, and the evidence helpers. There is also a guest-control layer: `exec_in_guest`, `run_applescript_in_guest`, `open_guest_app`, `list_guest_windows`, and `list_guest_processes`.
+
+They call the CLI internally. They do not expose raw Tart or arbitrary host commands. Flexibility stays inside the guest.
 
 Example prompt:
 
 > Use the macbox MCP server to create a sandbox from macos-sequoia-clean, upload my built app, run a smoke test, collect logs and a screenshot, then destroy the sandbox.
 
+When the fixed tools are not enough:
+
+> Use macbox MCP only. Create a sandbox, upload the app, open it with custom arguments, inspect the guest windows, run a guest command, and destroy the sandbox when done.
+
 See [docs/GUIDE.md](docs/GUIDE.md) for the full workflow. Cursor setup: [docs/CURSOR.md](docs/CURSOR.md).
 
-## Proof (tested on Apple Silicon)
+## Verified locally
 
 Local template: `macos-sequoia-clean`, SSH key at `~/.ssh/macbox_id`, Tart 2.32.x.
 
-**Third-party upload test — Amphetamine.app (7.4MB)**
+**Third-party upload test: Amphetamine.app (7.4MB)**
 
 ```bash
 macbox demo --app /Applications/Amphetamine.app --image macos-sequoia-clean --json
 ```
 
-Observed: `launched: true`, `crashed: false`, screenshot PNG (~3–6MB), syslog excerpt saved, no new crash reports, sandbox destroyed, base template untouched.
+Observed: `launched: true`, `crashed: false`, screenshot PNG saved, syslog excerpt saved, no new crash reports, sandbox destroyed, base template untouched.
 
-Manual step-by-step run (same result):
+Manual step-by-step run:
 
 ```bash
 macbox upload --name macbox-realapp-001 --path /Applications/Amphetamine.app \
@@ -179,15 +186,15 @@ macbox upload --name macbox-realapp-001 --path /Applications/Amphetamine.app \
 macbox run-app --name macbox-realapp-001 --app /Users/admin/Desktop/Amphetamine.app --timeout 120 --json
 ```
 
-**Built-in app — Calculator.app** (guest path, no upload):
+**Built-in app: Calculator.app** (guest path, no upload):
 
 ```bash
 macbox run-app --name macbox-test-001 --app /System/Applications/Calculator.app --timeout 60 --json
 ```
 
-**MCP end-to-end** — `create_sandbox` → `upload_app` → `run_app_smoke_test` → `destroy_sandbox` with Amphetamine.app, no shell. Passed.
+**MCP end-to-end**: `create_sandbox` -> `upload_app` -> `run_app_smoke_test` -> `destroy_sandbox` with Amphetamine.app. Passed.
 
-## Safety (short version)
+## Safety
 
 - MCP uploads: `.app`, `.dmg`, and `.pkg` only
 - Secret paths blocked (`~/.ssh`, `.env`, keychains, `*token*`, etc.)

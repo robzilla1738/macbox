@@ -23,6 +23,7 @@ from macbox.runs import (
 )
 from macbox.safety import (
     validate_disposable_vm_operation,
+    validate_guest_command,
     validate_guest_path,
     validate_start_vm,
     validate_upload_path,
@@ -129,6 +130,15 @@ class MountResult:
     mount_point: str
     volume_name: str
     app_candidates: list[str]
+
+
+@dataclass
+class GuestAppLaunchResult:
+    app_path: str
+    argv: list[str]
+    exit_code: int
+    stdout: str
+    stderr: str
 
 
 @dataclass
@@ -300,6 +310,151 @@ def list_profiles() -> dict[str, dict[str, Any]]:
 def guest_crash_basenames(session: GuestSession) -> set[str]:
     files = session.list_remote_files(GUEST_CRASH_DIR)
     return list_crash_basenames(files)
+
+
+def guest_exec_command(*, vm: str, command: str, timeout: int = 60):
+    validate_vm_name(vm)
+    guest_command = validate_guest_command(command)
+    session = _guest_session(vm)
+    return session.exec(guest_command, timeout=timeout)
+
+
+def run_guest_applescript(*, vm: str, script: str, timeout: int = 60):
+    guest_script = validate_guest_command(script)
+    command = (
+        "osascript <<'APPLESCRIPT'\n"
+        f"{guest_script}\n"
+        "APPLESCRIPT"
+    )
+    return guest_exec_command(vm=vm, command=command, timeout=timeout)
+
+
+def list_guest_windows(*, vm: str, app_name: str | None = None) -> list[dict[str, str]]:
+    if app_name:
+        script = (
+            "tell application \"System Events\"\n"
+            f"  if not (exists application process \"{app_name}\") then return \"\"\n"
+            f"  tell application process \"{app_name}\"\n"
+            "    set titleLines to {}\n"
+            "    repeat with w in windows\n"
+            "      try\n"
+            "        copy (name of w) to end of titleLines\n"
+            "      on error\n"
+            "        copy \"\" to end of titleLines\n"
+            "      end try\n"
+            "    end repeat\n"
+            "  end tell\n"
+            "  set AppleScript's text item delimiters to linefeed\n"
+            "  return titleLines as text\n"
+            "end tell"
+        )
+        result = run_guest_applescript(vm=vm, script=script, timeout=45)
+        return [
+            {"app_name": app_name, "title": line.strip()}
+            for line in result.stdout.splitlines()
+            if line.strip()
+        ]
+
+    script = (
+        "tell application \"System Events\"\n"
+        "  set titleLines to {}\n"
+        "  repeat with proc in application processes\n"
+        "    set procName to name of proc\n"
+        "    try\n"
+        "      repeat with w in windows of proc\n"
+        "        try\n"
+        "          copy (procName & \"::\" & name of w) to end of titleLines\n"
+        "        on error\n"
+        "          copy (procName & \"::\") to end of titleLines\n"
+        "        end try\n"
+        "      end repeat\n"
+        "    end try\n"
+        "  end repeat\n"
+        "  set AppleScript's text item delimiters to linefeed\n"
+        "  return titleLines as text\n"
+        "end tell"
+    )
+    result = run_guest_applescript(vm=vm, script=script, timeout=45)
+    windows: list[dict[str, str]] = []
+    for line in result.stdout.splitlines():
+        entry = line.strip()
+        if not entry:
+            continue
+        app, _, title = entry.partition("::")
+        windows.append({"app_name": app, "title": title})
+    return windows
+
+
+def list_guest_processes(*, vm: str, filter_text: str | None = None) -> list[dict[str, Any]]:
+    filter_text = filter_text.strip().lower() if filter_text else None
+    result = guest_exec_command(
+        vm=vm,
+        command="ps -axo pid=,%cpu=,rss=,comm=",
+        timeout=30,
+    )
+    processes: list[dict[str, Any]] = []
+    for line in result.stdout.splitlines():
+        raw = line.strip()
+        if not raw:
+            continue
+        parts = raw.split(None, 3)
+        if len(parts) != 4:
+            continue
+        pid_text, cpu_text, rss_text, command = parts
+        if filter_text and filter_text not in command.lower():
+            continue
+        try:
+            pid = int(pid_text)
+        except ValueError:
+            continue
+        try:
+            cpu_percent = float(cpu_text)
+        except ValueError:
+            cpu_percent = 0.0
+        try:
+            rss_kb = int(rss_text)
+        except ValueError:
+            rss_kb = 0
+        processes.append(
+            {
+                "pid": pid,
+                "cpu_percent": cpu_percent,
+                "rss_kb": rss_kb,
+                "command": command,
+            }
+        )
+    return processes
+
+
+def open_guest_app(
+    *,
+    vm: str,
+    app_path: str,
+    args: list[str] | None = None,
+    new_instance: bool = True,
+    wait_seconds: float | None = None,
+) -> GuestAppLaunchResult:
+    validate_vm_name(vm)
+    guest_app = validate_guest_path(app_path)
+    session = _guest_session(vm)
+    open_args = ["open"]
+    if new_instance:
+        open_args.append("-n")
+    open_args.append(guest_app)
+    if args:
+        open_args.append("--args")
+        open_args.extend(args)
+    command = " ".join(shlex.quote(item) for item in open_args)
+    result = session.exec(command, timeout=30)
+    if wait_seconds and wait_seconds > 0:
+        time.sleep(wait_seconds)
+    return GuestAppLaunchResult(
+        app_path=guest_app,
+        argv=open_args,
+        exit_code=result.exit_code,
+        stdout=result.stdout,
+        stderr=result.stderr,
+    )
 
 
 def collect_logs(

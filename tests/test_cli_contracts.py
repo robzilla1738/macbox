@@ -102,6 +102,61 @@ def test_mcp_upload_app_builds_argv(tmp_path, monkeypatch) -> None:
     assert captured["args"][captured["args"].index("--path") + 1] == str(app.resolve())
 
 
+def test_mcp_exec_in_guest_builds_argv(monkeypatch) -> None:
+    macbox_mcp = _load_macbox_mcp()
+    captured: dict[str, list[str]] = {}
+
+    def fake_run_macbox(*args: str):
+        captured["args"] = list(args)
+        return {"ok": True, "command": "exec", "vm": "macbox-abcd1234", "data": {}, "warnings": [], "errors": []}
+
+    monkeypatch.setattr(macbox_mcp, "_run_macbox", fake_run_macbox)
+    macbox_mcp.exec_in_guest("macbox-abcd1234", "uname -a", timeout_seconds=25)
+    assert captured["args"] == [
+        "exec",
+        "--name",
+        "macbox-abcd1234",
+        "--command",
+        "uname -a",
+        "--timeout",
+        "25",
+        "--json",
+    ]
+
+
+def test_mcp_open_guest_app_builds_argv(monkeypatch) -> None:
+    macbox_mcp = _load_macbox_mcp()
+    captured: dict[str, list[str]] = {}
+
+    def fake_run_macbox(*args: str):
+        captured["args"] = list(args)
+        return {"ok": True, "command": "open-app", "vm": "macbox-abcd1234", "data": {}, "warnings": [], "errors": []}
+
+    monkeypatch.setattr(macbox_mcp, "_run_macbox", fake_run_macbox)
+    macbox_mcp.open_guest_app(
+        "macbox-abcd1234",
+        "/Applications/Ghostty.app",
+        args=["-e", "zsh"],
+        new_instance=False,
+        wait_seconds=1.5,
+    )
+    assert captured["args"] == [
+        "open-app",
+        "--name",
+        "macbox-abcd1234",
+        "--app",
+        "/Applications/Ghostty.app",
+        "--wait-seconds",
+        "1.5",
+        "--reuse-instance",
+        "--arg",
+        "-e",
+        "--arg",
+        "zsh",
+        "--json",
+    ]
+
+
 def test_ssh_exec_uses_argument_array() -> None:
     from macbox.models import MacboxConfig
     from macbox.ssh import GuestSession

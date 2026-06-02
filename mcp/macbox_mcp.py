@@ -143,6 +143,89 @@ def reset_warm_sandbox(vm_name: str, image: str | None = None, profile: str | No
 
 
 @mcp.tool()
+def exec_in_guest(vm_name: str, command: str, timeout_seconds: int = 60) -> dict[str, Any]:
+    """Run a shell command inside the guest VM. This executes only inside the sandbox, not on the host."""
+    validate_vm_name(vm_name)
+    return _run_macbox(
+        "exec",
+        "--name",
+        vm_name,
+        "--command",
+        command,
+        "--timeout",
+        str(timeout_seconds),
+        "--json",
+    )
+
+
+@mcp.tool()
+def run_applescript_in_guest(vm_name: str, script: str, timeout_seconds: int = 60) -> dict[str, Any]:
+    """Run AppleScript inside the guest VM for UI automation or inspection."""
+    validate_vm_name(vm_name)
+    return _run_macbox(
+        "applescript",
+        "--name",
+        vm_name,
+        "--script",
+        script,
+        "--timeout",
+        str(timeout_seconds),
+        "--json",
+    )
+
+
+@mcp.tool()
+def open_guest_app(
+    vm_name: str,
+    app_path: str,
+    args: list[str] | None = None,
+    new_instance: bool = True,
+    wait_seconds: float = 0.0,
+) -> dict[str, Any]:
+    """Open an app inside the guest VM with optional launch arguments."""
+    validate_vm_name(vm_name)
+    cli_args = [
+        "open-app",
+        "--name",
+        vm_name,
+        "--app",
+        app_path,
+        "--wait-seconds",
+        str(wait_seconds),
+    ]
+    if new_instance:
+        cli_args.append("--new-instance")
+    else:
+        cli_args.append("--reuse-instance")
+    for item in args or []:
+        cli_args.extend(["--arg", item])
+    cli_args.append("--json")
+    return _run_macbox(*cli_args)
+
+
+@mcp.tool()
+def list_guest_windows(vm_name: str, app_name: str | None = None) -> dict[str, Any]:
+    """List visible guest window titles, optionally scoped to one app process name."""
+    validate_vm_name(vm_name)
+    args = ["list-windows", "--name", vm_name]
+    if app_name:
+        args.extend(["--app", app_name])
+    args.append("--json")
+    return _run_macbox(*args)
+
+
+@mcp.tool()
+def list_guest_processes(vm_name: str, filter_text: str | None = None) -> dict[str, Any]:
+    """List guest processes with pid, CPU, RSS, and command, optionally filtered by substring."""
+    validate_vm_name(vm_name)
+    args = ["list-processes", "--name", vm_name]
+    if filter_text:
+        args.extend(["--filter", filter_text])
+    args.append("--json")
+    return _run_macbox(*args)
+
+
+@mcp.tool()
 def upload_app(vm_name: str, app_path: str) -> dict[str, Any]:
     """Upload a .app bundle to the guest sandbox."""
     validate_vm_name(vm_name)

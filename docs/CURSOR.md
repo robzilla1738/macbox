@@ -1,6 +1,6 @@
 # Cursor MCP setup for macbox
 
-Add macbox as a local MCP server so Cursor agents can create sandboxes, upload apps, and run smoke tests without shell access to Tart.
+Add macbox as a local MCP server so Cursor can create sandboxes, upload apps, and run smoke tests through MCP instead of direct Tart commands.
 
 ## Prerequisites
 
@@ -13,7 +13,7 @@ Add macbox as a local MCP server so Cursor agents can create sandboxes, upload a
 In Cursor:
 
 1. Open **Settings** (Cmd+,)
-2. Go to **Features → MCP** (or search "MCP" in settings)
+2. Go to **Features -> MCP** (or search "MCP" in settings)
 3. Click **Add new global MCP server** or edit your MCP config file directly
 
 Cursor stores MCP config in one of:
@@ -38,7 +38,7 @@ Replace paths with your clone location:
 }
 ```
 
-Use the venv Python, not system `python3`, so `macbox` and `mcp` packages resolve.
+Use the venv Python instead of system `python3` so the installed `macbox` and `mcp` packages resolve the same way every time.
 
 Restart Cursor or reload MCP servers after saving.
 
@@ -50,7 +50,7 @@ In Cursor chat, you should see **macbox** listed under available MCP tools. Try:
 
 Expected: JSON with `"ok": true` and Tart/SSH checks passing.
 
-## 4. Example agent prompt (full loop)
+## 4. Example agent prompt
 
 > Use the macbox MCP server only. Do not run shell commands.
 > Create a headless sandbox from macos-sequoia-clean, upload /Applications/Amphetamine.app, run a 60-second smoke test, collect logs and crashes, then destroy the sandbox. Report artifact paths and any errors.
@@ -63,6 +63,16 @@ Tools invoked (in order):
 4. `run_app_smoke_test`
 5. `collect_logs` / `take_screenshot` / `collect_crashes` (optional)
 6. `destroy_sandbox`
+
+For more open-ended guest interaction, Cursor can also use:
+
+- `exec_in_guest`
+- `run_applescript_in_guest`
+- `open_guest_app`
+- `list_guest_windows`
+- `list_guest_processes`
+
+Those tools still stay inside the VM. They do not grant host shell access.
 
 ## 5. What the agent can and cannot do
 
@@ -77,10 +87,10 @@ Tools invoked (in order):
 
 | Issue | Fix |
 |-------|-----|
-| MCP server fails to start | Check venv path; run `pip install -e ".[dev]"` |
+| MCP server fails to start | Check the venv path; run `pip install -e ".[dev]"` |
 | Tools return doctor errors | Complete template VM setup in [GUIDE.md](GUIDE.md) |
 | `upload_app` rejected | Path must be `.app` or `.pkg` on the host |
-| Agent uses shell anyway | Repeat "use macbox MCP only, no shell" in the prompt |
+| Agent uses shell anyway | Repeat "use macbox MCP only, no shell" in the prompt and confirm the server is loaded before the run |
 
 ## 7. Screenshots (capture these in Cursor)
 
@@ -88,9 +98,9 @@ Save screenshots under `docs/screenshots/` for your repo or docs site:
 
 | File | What to capture |
 |------|-----------------|
-| `cursor-mcp-settings.png` | Cursor Settings → MCP with macbox entry visible |
+| `cursor-mcp-settings.png` | Cursor Settings -> MCP with macbox entry visible |
 | `cursor-mcp-tools.png` | Chat panel showing macbox tools enabled |
-| `cursor-mcp-demo.png` | Agent run completing sandbox create → destroy |
+| `cursor-mcp-demo.png` | Agent run completing sandbox create -> destroy |
 
 Example layout after capture:
 
@@ -111,4 +121,4 @@ For a quick local demo without configuring Cursor:
 macbox demo --app /Applications/Amphetamine.app --image macos-sequoia-clean --json
 ```
 
-See the **Proof** section in [README.md](../README.md).
+See the verification section in [README.md](../README.md).

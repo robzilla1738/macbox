@@ -8,6 +8,7 @@ from unittest.mock import patch
 import pytest
 
 from macbox.errors import AppError, SafetyError
+from macbox.models import GuestCommandResult
 from macbox.workflows import (
     AssertionResult,
     GateResult,
@@ -15,7 +16,12 @@ from macbox.workflows import (
     StartResult,
     UploadResult,
     assert_app_running,
+    guest_exec_command,
+    list_guest_processes,
+    list_guest_windows,
+    open_guest_app,
     resolve_profile,
+    run_guest_applescript,
     run_release_gate,
     upload_artifact_to_guest,
 )
@@ -194,3 +200,99 @@ def test_assert_app_running_does_not_treat_candidate_process_name_as_bundle_matc
     assert result.message == "Bundle com.example.Demo is not running."
     assert result.details["candidate_paths"] == [str(candidate)]
     assert result.details["matched_process_names"] == ["Demo"]
+
+
+def test_guest_exec_command_uses_guest_session() -> None:
+    with patch("macbox.workflows._guest_session") as guest_session:
+        guest_session.return_value.exec.return_value = GuestCommandResult(
+            exit_code=0,
+            stdout="ok\n",
+            stderr="",
+        )
+
+        result = guest_exec_command(vm="macbox-test-001", command="uname -a", timeout=25)
+
+    assert result.stdout == "ok\n"
+    guest_session.return_value.exec.assert_called_once_with("uname -a", timeout=25)
+
+
+def test_run_guest_applescript_wraps_script_in_heredoc() -> None:
+    with patch("macbox.workflows._guest_session") as guest_session:
+        guest_session.return_value.exec.return_value = GuestCommandResult(
+            exit_code=0,
+            stdout="done\n",
+            stderr="",
+        )
+
+        result = run_guest_applescript(
+            vm="macbox-test-001",
+            script='return "done"',
+            timeout=12,
+        )
+
+    assert result.stdout == "done\n"
+    guest_session.return_value.exec.assert_called_once_with(
+        "osascript <<'APPLESCRIPT'\nreturn \"done\"\nAPPLESCRIPT",
+        timeout=12,
+    )
+
+
+def test_list_guest_windows_parses_unscoped_titles() -> None:
+    with patch("macbox.workflows.run_guest_applescript") as applescript:
+        applescript.return_value = GuestCommandResult(
+            exit_code=0,
+            stdout="Ghostty::READY\nHarness::bench-01\n",
+            stderr="",
+        )
+
+        windows = list_guest_windows(vm="macbox-test-001")
+
+    assert windows == [
+        {"app_name": "Ghostty", "title": "READY"},
+        {"app_name": "Harness", "title": "bench-01"},
+    ]
+
+
+def test_list_guest_processes_parses_and_filters() -> None:
+    with patch("macbox.workflows.guest_exec_command") as guest_exec:
+        guest_exec.return_value = GuestCommandResult(
+            exit_code=0,
+            stdout=(
+                "123  0.1  2048 /Applications/Ghostty.app/Contents/MacOS/ghostty\n"
+                "456  8.5  8192 /Applications/Harness.app/Contents/MacOS/Harness\n"
+            ),
+            stderr="",
+        )
+
+        processes = list_guest_processes(vm="macbox-test-001", filter_text="Harness")
+
+    assert processes == [
+        {
+            "pid": 456,
+            "cpu_percent": 8.5,
+            "rss_kb": 8192,
+            "command": "/Applications/Harness.app/Contents/MacOS/Harness",
+        }
+    ]
+
+
+def test_open_guest_app_builds_open_command_with_args() -> None:
+    with patch("macbox.workflows._guest_session") as guest_session:
+        guest_session.return_value.exec.return_value = GuestCommandResult(
+            exit_code=0,
+            stdout="",
+            stderr="",
+        )
+
+        result = open_guest_app(
+            vm="macbox-test-001",
+            app_path="/Applications/Ghostty.app",
+            args=["-e", "zsh", "-lc", "echo hi"],
+            new_instance=True,
+        )
+
+    assert result.argv == ["open", "-n", "/Applications/Ghostty.app", "--args", "-e", "zsh", "-lc", "echo hi"]
+    guest_session.return_value.exec.assert_called_once_with(
+        "open -n /Applications/Ghostty.app --args -e zsh -lc 'echo hi'",
+        timeout=30,
+    )

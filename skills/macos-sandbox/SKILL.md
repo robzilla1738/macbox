@@ -5,7 +5,7 @@ description: Use this skill when testing, launching, debugging, smoke-testing, o
 
 # macOS Sandbox Testing with macbox
 
-Use macbox when you need to validate a macOS app build in a clean local VM without touching the host environment.
+Use macbox when you need to validate a macOS app build in a clean local VM without touching the host.
 
 ## When to use
 
@@ -35,7 +35,7 @@ macbox doctor --json
 macbox status --json
 ```
 
-Confirm `doctor` reports Tart, ssh/scp, SSH identity, and state directory are OK.
+Confirm `doctor` reports Tart, ssh/scp, SSH identity, and the state directory as OK.
 
 ### 2. Create sandbox
 
@@ -89,6 +89,13 @@ macbox collect-crashes --name macbox-test-001 --json
 
 Or MCP equivalents: `collect_logs`, `take_screenshot`, `collect_crashes`.
 
+If you need a custom interaction path inside the VM, use the guest-control tools:
+- `exec_in_guest`
+- `run_applescript_in_guest`
+- `open_guest_app`
+- `list_guest_windows`
+- `list_guest_processes`
+
 ### 6. Reset or destroy sandbox
 
 When finished, always clean up:
@@ -99,7 +106,7 @@ macbox destroy --name macbox-test-001 --json
 
 Or `reset_sandbox` / `destroy_sandbox` via MCP.
 
-Use `reset` when you need a fresh VM with the same name. Use `destroy` when done entirely.
+Use `reset` when you need a fresh VM with the same name. Use `destroy` when you are done with it.
 
 ### 7. Report findings
 

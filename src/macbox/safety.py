@@ -33,6 +33,7 @@ SECRET_NAME_PATTERNS = (
 
 ALLOWED_UPLOAD_SUFFIXES = (".app", ".pkg", ".dmg")
 DISPOSABLE_VM_PREFIX = "macbox-"
+MAX_GUEST_COMMAND_LENGTH = 16_384
 
 
 def protected_image_names(config) -> set[str]:
@@ -173,4 +174,11 @@ def validate_guest_path(guest_path: str) -> str:
 def validate_guest_command(command: str) -> str:
     if not command.strip():
         raise SafetyError("Guest command must not be empty")
+    if "\x00" in command:
+        raise SafetyError("Guest command contains invalid characters")
+    if len(command) > MAX_GUEST_COMMAND_LENGTH:
+        raise SafetyError(
+            "Guest command is too long",
+            details={"max_length": MAX_GUEST_COMMAND_LENGTH},
+        )
     return command

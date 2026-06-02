@@ -1,6 +1,6 @@
 # macbox guide
 
-This is the practical walkthrough: install, prepare a template VM, run `.app` / `.dmg` / `.pkg` tests from the CLI or MCP, read artifacts and reports, and fix common problems.
+This is the setup and usage guide for macbox: install it, prepare a template VM, run `.app` / `.dmg` / `.pkg` tests from the CLI or MCP, and read the resulting artifacts and reports.
 
 ## What macbox is (and is not)
 
@@ -60,7 +60,7 @@ chmod 600 ~/.ssh/macbox_id
 tart clone ghcr.io/cirruslabs/macos-sequoia-base:latest macos-sequoia-clean
 ```
 
-This downloads a large OCI image. On a slow connection, clone on another Mac and `tart export` / `tart import` the `.tvm` file instead.
+This downloads a large OCI image. If that is slow on your machine, clone it on another Mac and move it over with `tart export` / `tart import`.
 
 ### 3. Boot the template and enable SSH
 
@@ -70,9 +70,9 @@ tart run macos-sequoia-clean
 
 In the guest (GUI):
 
-1. **System Settings → General → Sharing → Remote Login** — on
-2. **Users & Groups → Login Options** — auto-login for `admin`
-3. **Lock Screen** — disable password on wake if you can
+1. **System Settings -> General -> Sharing -> Remote Login** - on
+2. **Users & Groups -> Login Options** - auto-login for `admin`
+3. **Lock Screen** - disable password on wake if you can
 
 Tart base images use user `admin` / password `admin` for first login.
 
@@ -120,7 +120,7 @@ Or:
 ./scripts/demo.sh /path/to/YourApp.app
 ```
 
-Runs start, upload, smoke test, and destroy in one shot. Prints artifact paths in JSON.
+This runs start, upload, smoke test, and destroy in one shot. It prints artifact paths as JSON.
 
 Cursor MCP setup: [CURSOR.md](CURSOR.md).
 
@@ -141,7 +141,7 @@ macbox writes `~/.macbox/config.json` on first run. Defaults:
 }
 ```
 
-`protected_images` always includes `default_image`. macbox refuses to `destroy` or `reset` those names so you do not delete your template by mistake.
+`protected_images` always includes `default_image`. macbox refuses to `destroy` or `reset` those names so you do not delete your template by accident.
 
 Override state dir for tests:
 
@@ -188,6 +188,20 @@ Named profiles can be used anywhere an image can be used:
 macbox profiles --json
 macbox start --profile macos-sequoia-dark-mode --name macbox-dark-001 --json
 ```
+
+### Guest control primitives
+
+When the fixed smoke/gate workflows are not enough, use the guest-side primitives:
+
+```bash
+macbox exec --name macbox-test-001 --command "uname -a" --json
+macbox applescript --name macbox-test-001 --script 'tell application "Finder" to get name of startup disk' --json
+macbox open-app --name macbox-test-001 --app /Applications/Ghostty.app --arg=-e --arg=zsh --json
+macbox list-windows --name macbox-test-001 --json
+macbox list-processes --name macbox-test-001 --filter Ghostty --json
+```
+
+These run inside the guest VM only. They do not expose host shell access.
 
 ### Upload a build
 
@@ -313,7 +327,7 @@ macbox destroy --name macbox-warm-sequoia --json
 
 ### Release gate and matrix
 
-Gate mode gives you a single pass/fail decision with structured evidence:
+Gate mode gives you a single pass/fail result with structured evidence:
 
 ```bash
 macbox gate \
@@ -390,9 +404,15 @@ Use the venv Python so `macbox` and `mcp` are on the path.
 |------|----------------|
 | `macbox_status` | Host + Tart readiness |
 | `list_images` | Local Tart VMs (same as CLI `images`) |
+| `list_profiles` | Built-in and configured sandbox profiles |
 | `create_sandbox` | `start` with auto-generated `macbox-<id>` name |
 | `create_warm_sandbox` | Start a reusable warm VM |
 | `run_on_warm_sandbox` | Upload a local `.app` to a warm VM and smoke-test it |
+| `exec_in_guest` | Run a guest shell command |
+| `run_applescript_in_guest` | Run guest AppleScript |
+| `open_guest_app` | Launch an app with optional arguments |
+| `list_guest_windows` | Read visible guest window titles |
+| `list_guest_processes` | Read guest process state |
 | `upload_app` | Upload `.app` to guest Desktop |
 | `upload_dmg` | Upload `.dmg` to guest Desktop |
 | `upload_pkg` | Upload `.pkg` to guest Desktop |
@@ -413,7 +433,7 @@ Use the venv Python so `macbox` and `mcp` are on the path.
 | `reset_warm_sandbox` | Reset a warm sandbox in place |
 | `destroy_sandbox` | Stop and delete sandbox |
 
-MCP calls the `macbox` CLI with fixed argument arrays. No raw Tart. No host shell.
+MCP calls the `macbox` CLI with fixed argument arrays. It does not expose raw Tart or host shell access.
 
 ### Example agent prompt
 
@@ -487,4 +507,4 @@ Integration tests need Tart and a working template VM.
 
 ## What is manual on purpose
 
-macbox does not auto-configure the guest GUI, install SSH keys, or click through security dialogs. That keeps behavior predictable and avoids storing passwords. You do template prep once; sandboxes are disposable from then on.
+macbox does not auto-configure the guest GUI, install SSH keys, or click through security dialogs. That keeps the behavior predictable and avoids storing passwords. You do the template prep once, then the disposable sandboxes follow the same path each time.

@@ -1,10 +1,10 @@
 # Agent instructions for macbox
 
-Instructions for AI coding agents (Cursor, Claude Code, Codex, etc.) using macbox or working on this repository.
+Instructions for coding agents using macbox or working in this repository.
 
 ## Purpose
 
-macbox lets you smoke-test macOS applications inside disposable local VMs. You get structured JSON back: launch result, screenshot path, logs, crash reports, and a single report artifact with verdict, diagnosis, and next actions. The host stays clean.
+macbox smoke-tests macOS applications inside disposable local VMs. It returns structured JSON with the launch result, screenshot path, logs, crash reports, and a report artifact with the verdict, diagnosis, and next actions. The host stays clean.
 
 ## When to use macbox
 
@@ -42,6 +42,11 @@ If doctor fails, point the user to [docs/GUIDE.md](docs/GUIDE.md). Do not guess 
 | `create_sandbox` | New disposable VM from template |
 | `create_warm_sandbox` | Start a reusable warm VM |
 | `run_on_warm_sandbox` | Upload a local `.app` to a warm VM and run it |
+| `exec_in_guest` | Run a guest shell command inside the VM |
+| `run_applescript_in_guest` | Run guest AppleScript for UI automation or inspection |
+| `open_guest_app` | Launch a guest app with optional arguments |
+| `list_guest_windows` | Inspect current guest window titles |
+| `list_guest_processes` | Inspect guest process state |
 | `upload_app` | Copy `.app` bundle to guest |
 | `upload_dmg` | Copy `.dmg` to guest |
 | `upload_pkg` | Copy `.pkg` to guest |
@@ -70,7 +75,9 @@ If doctor fails, point the user to [docs/GUIDE.md](docs/GUIDE.md). Do not guess 
 3. `upload_app(vm_name, "/absolute/path/to/App.app")`
 4. `run_app_smoke_test(vm_name, "App.app", timeout_seconds=120)`
 5. Optionally `collect_logs`, `take_screenshot`, `collect_crashes`
-6. `destroy_sandbox(vm_name)` — always, even on failure
+6. `destroy_sandbox(vm_name)` - always, even on failure
+
+If the fixed tools are not enough, drop to the guest-control tools before reaching for ad hoc host shell commands. Keep that flexibility inside the VM.
 
 Report to the user:
 
@@ -84,6 +91,7 @@ Report to the user:
 - Never upload secret paths: `~/.ssh`, `.gnupg`, `.env`, keychains, browser profiles, files matching `*secret*`, `*token*`, `*credential*`
 - MCP only allows `.app`, `.dmg`, and `.pkg` uploads
 - Never run arbitrary host shell commands as a substitute for macbox tools
+- Prefer guest-control tools over host shell when you need custom interaction
 - Never destroy template VM names (`macos-sequoia-clean`, `default_image`, `protected_images`)
 - Guest execution happens only through macbox commands, not ad-hoc SSH from the agent unless debugging setup
 
@@ -98,7 +106,7 @@ macbox run-app --name macbox-test-001 --app /Users/admin/Desktop/MyApp.app --tim
 macbox destroy --name macbox-test-001 --json
 ```
 
-For a one-shot demo (start → upload → smoke → destroy → print artifact paths):
+For a one-command demo (start -> upload -> smoke -> destroy -> print artifact paths):
 
 ```bash
 macbox demo --app /Applications/Amphetamine.app --image macos-sequoia-clean --json

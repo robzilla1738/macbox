@@ -14,7 +14,6 @@ from macbox.runner import run_command
 from macbox.runs import RunManager
 from macbox.safety import (
     validate_disposable_vm_operation,
-    validate_guest_command,
     validate_guest_path,
     validate_vm_name,
 )
@@ -27,14 +26,19 @@ from macbox.workflows import (
     collect_logs,
     destroy_sandbox,
     download_crash_reports,
+    guest_exec_command,
     guest_crash_basenames,
     install_dmg_app,
     install_pkg,
     list_profiles,
+    list_guest_processes,
+    list_guest_windows,
     load_report,
     mount_dmg,
+    open_guest_app,
     reset_sandbox,
     run_app_smoke,
+    run_guest_applescript,
     run_demo,
     run_installed_app,
     run_on_warm,
@@ -523,10 +527,7 @@ def install_pkg_cmd(
 @click.option("--json", "as_json", is_flag=True, default=False)
 def exec_cmd(name: str, command: str, timeout: int, as_json: bool) -> None:
     def run():
-        validate_vm_name(name)
-        cmd = validate_guest_command(command)
-        session = _guest_session(name)
-        result = session.exec(cmd, timeout=timeout)
+        result = guest_exec_command(vm=name, command=command, timeout=timeout)
         response = success(
             "exec",
             vm=name,
@@ -541,6 +542,109 @@ def exec_cmd(name: str, command: str, timeout: int, as_json: bool) -> None:
         emit(response, as_json=as_json)
 
     handle_errors("exec", name, run, as_json=as_json)
+
+
+@main.command("applescript")
+@click.option("--name", required=True)
+@click.option("--script", required=True)
+@click.option("--timeout", default=60, show_default=True)
+@click.option("--json", "as_json", is_flag=True, default=False)
+def applescript_cmd(name: str, script: str, timeout: int, as_json: bool) -> None:
+    def run():
+        result = run_guest_applescript(vm=name, script=script, timeout=timeout)
+        response = success(
+            "applescript",
+            vm=name,
+            data={
+                "exit_code": result.exit_code,
+                "stdout": result.stdout,
+                "stderr": result.stderr,
+            },
+        )
+        if result.exit_code != 0:
+            emit(response, exit_code=result.exit_code, as_json=as_json)
+        emit(response, as_json=as_json)
+
+    handle_errors("applescript", name, run, as_json=as_json)
+
+
+@main.command("open-app")
+@click.option("--name", required=True)
+@click.option("--app", "app_path", required=True)
+@click.option("--arg", "app_args", multiple=True)
+@click.option("--new-instance/--reuse-instance", default=True, show_default=True)
+@click.option("--wait-seconds", default=0.0, show_default=True, type=float)
+@click.option("--json", "as_json", is_flag=True, default=False)
+def open_app_cmd(
+    name: str,
+    app_path: str,
+    app_args: tuple[str, ...],
+    new_instance: bool,
+    wait_seconds: float,
+    as_json: bool,
+) -> None:
+    def run():
+        result = open_guest_app(
+            vm=name,
+            app_path=app_path,
+            args=list(app_args),
+            new_instance=new_instance,
+            wait_seconds=wait_seconds,
+        )
+        response = success(
+            "open-app",
+            vm=name,
+            data={
+                "app_path": result.app_path,
+                "argv": result.argv,
+                "exit_code": result.exit_code,
+                "stdout": result.stdout,
+                "stderr": result.stderr,
+            },
+        )
+        if result.exit_code != 0:
+            emit(response, exit_code=result.exit_code, as_json=as_json)
+        emit(response, as_json=as_json)
+
+    handle_errors("open-app", name, run, as_json=as_json)
+
+
+@main.command("list-windows")
+@click.option("--name", required=True)
+@click.option("--app", "app_name", default=None)
+@click.option("--json", "as_json", is_flag=True, default=False)
+def list_windows_cmd(name: str, app_name: str | None, as_json: bool) -> None:
+    def run():
+        windows = list_guest_windows(vm=name, app_name=app_name)
+        emit(
+            success(
+                "list-windows",
+                vm=name,
+                data={"windows": windows, "count": len(windows), "app_name": app_name},
+            ),
+            as_json=as_json,
+        )
+
+    handle_errors("list-windows", name, run, as_json=as_json)
+
+
+@main.command("list-processes")
+@click.option("--name", required=True)
+@click.option("--filter", "filter_text", default=None)
+@click.option("--json", "as_json", is_flag=True, default=False)
+def list_processes_cmd(name: str, filter_text: str | None, as_json: bool) -> None:
+    def run():
+        processes = list_guest_processes(vm=name, filter_text=filter_text)
+        emit(
+            success(
+                "list-processes",
+                vm=name,
+                data={"processes": processes, "count": len(processes), "filter": filter_text},
+            ),
+            as_json=as_json,
+        )
+
+    handle_errors("list-processes", name, run, as_json=as_json)
 
 
 @main.command("run-app")
