@@ -42,12 +42,21 @@ If doctor fails, point the user to [docs/GUIDE.md](docs/GUIDE.md). Do not guess 
 | `create_sandbox` | New disposable VM from template |
 | `create_warm_sandbox` | Start a reusable warm VM |
 | `run_on_warm_sandbox` | Upload a local `.app` to a warm VM and run it |
+| `watch_sandbox` | Return native window/VNC watch instructions for a running VM |
 | `exec_in_guest` | Run a guest shell command inside the VM |
 | `run_applescript_in_guest` | Run guest AppleScript for UI automation or inspection |
 | `run_jxa_in_guest` | Run guest JavaScript for Automation (ObjC/Quartz bridge) |
+| `prepare_agent_workspace` | Create/reset guest workspace directories for agent scripts |
+| `run_script_in_guest` | Run shell/AppleScript/JXA from a guest-side file and save diagnostics |
+| `observe_guest` | Screenshot + frontmost app/window + screen/windows/process state |
+| `inspect_ui_tree` | Inspect guest Accessibility tree |
+| `click_ui_element` | Press a UI element by role/title/name selector |
 | `type_text_in_guest` | Type literal text into the frontmost guest app |
+| `paste_text_in_guest` | Paste text through the guest clipboard |
 | `send_keys_in_guest` | Send a key or key-combination (named keys + modifiers) |
 | `click_in_guest` | Click at guest screen coordinates |
+| `scroll_in_guest` | Send a guest scroll event |
+| `drag_in_guest` | Drag between guest screen coordinates |
 | `open_guest_app` | Launch a guest app with optional arguments |
 | `list_guest_windows` | Inspect current guest window titles |
 | `list_guest_processes` | Inspect guest process state |
@@ -79,13 +88,15 @@ If doctor fails, point the user to [docs/GUIDE.md](docs/GUIDE.md). Do not guess 
 ## Standard workflow
 
 1. Call `macbox_status()`. Stop if not ready.
-2. `create_sandbox(image="macos-sequoia-clean", headless=True)`
+2. `create_sandbox(image="macos-sequoia-clean", display_mode="headless")`
 3. `upload_app(vm_name, "/absolute/path/to/App.app")`
 4. `run_app_smoke_test(vm_name, "App.app", timeout_seconds=120)`
-5. Optionally `collect_logs`, `take_screenshot`, `collect_crashes`
+5. Optionally `observe_guest`, `inspect_ui_tree`, `collect_logs`, `take_screenshot`, `collect_crashes`
 6. `destroy_sandbox(vm_name)` - always, even on failure
 
-If the fixed tools are not enough, drop to the guest-control tools before reaching for ad hoc host shell commands. Keep that flexibility inside the VM.
+If the user wants to watch, use `display_mode="window"` or `display_mode="vnc"` and report `data.watch`. Use `watch_sandbox(open_viewer=true)` only for the fixed VNC URL returned by macbox.
+
+If the fixed tools are not enough, drop to guest-control tools before reaching for ad hoc host shell commands. Keep that flexibility inside the VM. Prefer `observe_guest` and `inspect_ui_tree` before coordinate clicks, and use `run_script_in_guest` for long multi-step guest work.
 
 Report to the user:
 
@@ -100,6 +111,7 @@ Report to the user:
 - Typed uploads (`upload_app`/`upload_dmg`/`upload_pkg`) allow only `.app`, `.dmg`, `.pkg`
 - `push_file_to_guest` / `pull_file_from_guest` move arbitrary files, but secret paths stay blocked
 - Never run arbitrary host shell commands as a substitute for macbox tools
+- Do not add host shell escape hatches; new autonomy belongs inside the guest VM
 - Prefer guest-control tools over host shell when you need custom interaction
 - Never destroy template VM names (`macos-sequoia-clean`, `default_image`, `protected_images`)
 - Guest execution happens only through macbox commands, not ad-hoc SSH from the agent unless debugging setup
@@ -109,7 +121,7 @@ Report to the user:
 If MCP is unavailable, the same flow works via shell:
 
 ```bash
-macbox start --image macos-sequoia-clean --name macbox-test-001 --headless --json
+macbox start --image macos-sequoia-clean --name macbox-test-001 --display-mode headless --json
 macbox upload --name macbox-test-001 --path ./dist/MyApp.app --dest /Users/admin/Desktop/MyApp.app --json
 macbox run-app --name macbox-test-001 --app /Users/admin/Desktop/MyApp.app --timeout 120 --json
 macbox destroy --name macbox-test-001 --json

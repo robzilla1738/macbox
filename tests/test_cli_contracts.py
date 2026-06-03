@@ -157,6 +157,101 @@ def test_mcp_open_guest_app_builds_argv(monkeypatch) -> None:
     ]
 
 
+def test_mcp_create_sandbox_accepts_display_mode(monkeypatch) -> None:
+    macbox_mcp = _load_macbox_mcp()
+    captured: dict[str, list[str]] = {}
+
+    def fake_run_macbox(*args: str):
+        captured["args"] = list(args)
+        return {"ok": True, "command": "start", "vm": "macbox-abcd1234", "data": {}, "warnings": [], "errors": []}
+
+    monkeypatch.setattr(macbox_mcp, "_run_macbox", fake_run_macbox)
+    macbox_mcp.create_sandbox("macos-sequoia-clean", display_mode="vnc")
+    assert "--display-mode" in captured["args"]
+    assert captured["args"][captured["args"].index("--display-mode") + 1] == "vnc"
+    assert "--headless" not in captured["args"]
+
+
+def test_mcp_new_guest_tools_build_argv(monkeypatch) -> None:
+    macbox_mcp = _load_macbox_mcp()
+    calls: list[list[str]] = []
+
+    def fake_run_macbox(*args: str):
+        calls.append(list(args))
+        return {"ok": True, "command": args[0], "vm": "macbox-abcd1234", "data": {}, "warnings": [], "errors": []}
+
+    monkeypatch.setattr(macbox_mcp, "_run_macbox", fake_run_macbox)
+    macbox_mcp.watch_sandbox("macbox-abcd1234", open_viewer=True)
+    macbox_mcp.prepare_agent_workspace("macbox-abcd1234", reset=True)
+    macbox_mcp.run_script_in_guest("macbox-abcd1234", "echo hi", language="shell", timeout_seconds=42)
+    macbox_mcp.observe_guest("macbox-abcd1234", process_filter="Finder")
+    macbox_mcp.inspect_ui_tree("macbox-abcd1234", app_name="Finder", max_depth=2, max_items=25)
+    macbox_mcp.click_ui_element("macbox-abcd1234", app_name="Finder", role="button", title="OK", exact=True)
+    macbox_mcp.paste_text_in_guest("macbox-abcd1234", "hello")
+    macbox_mcp.scroll_in_guest("macbox-abcd1234", delta_x=1, delta_y=-3)
+    macbox_mcp.drag_in_guest("macbox-abcd1234", 1, 2, 3, 4, steps=5)
+
+    assert calls[0] == ["watch", "--name", "macbox-abcd1234", "--open", "--json"]
+    assert calls[1] == ["prepare-agent-workspace", "--name", "macbox-abcd1234", "--reset", "--json"]
+    assert calls[2] == [
+        "run-script",
+        "--name",
+        "macbox-abcd1234",
+        "--script",
+        "echo hi",
+        "--language",
+        "shell",
+        "--timeout",
+        "42",
+        "--json",
+    ]
+    assert calls[3] == ["observe", "--name", "macbox-abcd1234", "--process-filter", "Finder", "--json"]
+    assert calls[4] == [
+        "inspect-ui-tree",
+        "--name",
+        "macbox-abcd1234",
+        "--max-depth",
+        "2",
+        "--max-items",
+        "25",
+        "--app",
+        "Finder",
+        "--json",
+    ]
+    assert "--exact" in calls[5]
+    assert calls[6] == ["paste-text", "--name", "macbox-abcd1234", "--text", "hello", "--timeout", "30", "--json"]
+    assert calls[7] == [
+        "scroll",
+        "--name",
+        "macbox-abcd1234",
+        "--delta-x",
+        "1",
+        "--delta-y",
+        "-3",
+        "--timeout",
+        "30",
+        "--json",
+    ]
+    assert calls[8] == [
+        "drag",
+        "--name",
+        "macbox-abcd1234",
+        "--start-x",
+        "1",
+        "--start-y",
+        "2",
+        "--end-x",
+        "3",
+        "--end-y",
+        "4",
+        "--steps",
+        "5",
+        "--timeout",
+        "30",
+        "--json",
+    ]
+
+
 def test_ssh_exec_uses_argument_array() -> None:
     from macbox.models import MacboxConfig
     from macbox.ssh import GuestSession

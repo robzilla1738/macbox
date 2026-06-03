@@ -9,7 +9,7 @@ from macbox.config import get_state_dir, load_config
 from macbox.errors import RunError
 from typing import Literal
 
-from macbox.models import RunMetadata, make_run_id, utc_now_iso
+from macbox.models import DisplayMode, RunMetadata, make_run_id, utc_now_iso
 
 RunStatus = Literal["running", "stopped", "destroyed", "failed"]
 
@@ -28,7 +28,14 @@ class RunManager:
         config = load_config()
         return cls(get_state_dir(config))
 
-    def create_run(self, vm: str, image: str) -> RunMetadata:
+    def create_run(
+        self,
+        vm: str,
+        image: str,
+        *,
+        display_mode: DisplayMode = "headless",
+        watch: dict | None = None,
+    ) -> RunMetadata:
         run_id = make_run_id(vm)
         metadata = RunMetadata(
             run_id=run_id,
@@ -36,6 +43,8 @@ class RunManager:
             image=image,
             created_at=utc_now_iso(),
             status="running",
+            display_mode=display_mode,
+            watch=watch or {},
         )
         run_dir = self.run_dir(run_id)
         run_dir.mkdir(parents=True, exist_ok=True)

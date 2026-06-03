@@ -21,7 +21,9 @@ macbox handles that loop for you: create a disposable VM, copy in the artifact, 
 - **Release gates** for `.app`, `.dmg`, and `.pkg` artifacts
 - **Matrix testing** and **warm VM** flows for repeat validation
 - **Composable guest-control tools** for app launch, guest shell, AppleScript, windows, and processes
-- **Full guest automation** for keyboard input, mouse clicks, JXA, and arbitrary file push/pull
+- **Full guest automation** for semantic UI inspection/clicks, keyboard input, paste, mouse clicks, scroll, drag, JXA, and arbitrary file push/pull
+- **Watchable sandboxes** with native Tart windows or VNC Screen Sharing URLs
+- **Agent workspace scripts** that run inside the guest and save stdout/stderr diagnostics
 - **Protected base templates** so `destroy` cannot wipe your base image
 
 ## Quick start
@@ -69,13 +71,22 @@ This starts a disposable VM, uploads the app, runs a smoke test, saves artifacts
 ## Example: smoke-test an app (step by step)
 
 ```bash
-macbox start --image macos-sequoia-clean --name macbox-test-001 --headless --json
+macbox start --image macos-sequoia-clean --name macbox-test-001 --display-mode headless --json
 macbox upload --name macbox-test-001 --path ./dist/MyApp.app --dest /Users/admin/Desktop/MyApp.app --json
 macbox run-app --name macbox-test-001 --app /Users/admin/Desktop/MyApp.app --timeout 120 --json
 macbox destroy --name macbox-test-001 --json
 ```
 
 `run-app` waits, captures a screenshot, pulls recent logs, diff-checks crash reports, writes a structured `report.json`, and returns paths under `~/.macbox/runs/`.
+
+To let the user watch live, start with a display mode:
+
+```bash
+macbox start --image macos-sequoia-clean --name macbox-watch-001 --display-mode vnc --json
+macbox watch --name macbox-watch-001 --json
+```
+
+`display_mode` can be `headless`, `window`, or `vnc`. VNC responses include a `vnc://<guest-ip>` URL for macOS Screen Sharing.
 
 ## Structured report
 
@@ -153,9 +164,9 @@ If you want an IDE agent to drive the sandbox, point Cursor, Claude Code, or ano
 }
 ```
 
-Tools include `create_sandbox`, `create_warm_sandbox`, `run_on_warm_sandbox`, `upload_app`, `upload_dmg`, `install_guest_pkg`, `run_app_smoke_test`, `run_release_gate`, `run_release_matrix`, `get_run_report`, and the evidence helpers. There is also a guest-control layer: `exec_in_guest`, `run_applescript_in_guest`, `open_guest_app`, `list_guest_windows`, and `list_guest_processes`.
+Tools include `create_sandbox`, `create_warm_sandbox`, `run_on_warm_sandbox`, `upload_app`, `upload_dmg`, `install_guest_pkg`, `run_app_smoke_test`, `run_release_gate`, `run_release_matrix`, `get_run_report`, and the evidence helpers. There is also a guest-control layer: `exec_in_guest`, `run_applescript_in_guest`, `open_guest_app`, `list_guest_windows`, `list_guest_processes`, `observe_guest`, `inspect_ui_tree`, and `click_ui_element`.
 
-For full control inside the VM there is also keyboard and mouse automation (`type_text_in_guest`, `send_keys_in_guest`, `click_in_guest`), a JXA escape hatch (`run_jxa_in_guest`), and generic bidirectional file transfer (`push_file_to_guest`, `pull_file_from_guest`).
+For full control inside the VM there is also keyboard and mouse automation (`type_text_in_guest`, `send_keys_in_guest`, `click_in_guest`, `paste_text_in_guest`, `scroll_in_guest`, `drag_in_guest`), a JXA escape hatch (`run_jxa_in_guest`), an agent workspace/script runner (`prepare_agent_workspace`, `run_script_in_guest`), live-watch metadata (`watch_sandbox`), and generic bidirectional file transfer (`push_file_to_guest`, `pull_file_from_guest`).
 
 They call the CLI internally. They do not expose raw Tart or arbitrary host commands. Flexibility stays inside the guest.
 
@@ -166,6 +177,10 @@ Example prompt:
 When the fixed tools are not enough:
 
 > Use macbox MCP only. Create a sandbox, upload the app, open it with custom arguments, inspect the guest windows, run a guest command, and destroy the sandbox when done.
+
+When the user wants to watch:
+
+> Use macbox MCP with display_mode vnc, report the watch URL, observe the guest before each UI action, and destroy the sandbox when done.
 
 See [docs/GUIDE.md](docs/GUIDE.md) for the full workflow. Cursor setup: [docs/CURSOR.md](docs/CURSOR.md).
 
@@ -201,6 +216,7 @@ macbox run-app --name macbox-test-001 --app /System/Applications/Calculator.app 
 
 - Typed artifact uploads (`upload_app` / `upload_dmg` / `upload_pkg`) accept `.app`, `.dmg`, `.pkg` only
 - Generic `push_file_to_guest` / `pull_file_from_guest` move any file, but secret paths stay blocked
+- `watch_sandbox --open` only opens the fixed VNC URL returned for the running VM
 - Secret paths blocked (`~/.ssh`, `.env`, keychains, `*token*`, etc.)
 - Guest SSH: key auth only, `BatchMode=yes`
 - Base image names are protected from `destroy` / `reset`

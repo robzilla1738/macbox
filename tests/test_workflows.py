@@ -16,19 +16,29 @@ from macbox.workflows import (
     StartResult,
     UploadResult,
     assert_app_running,
+    click_ui_element,
+    drag_in_guest,
     guest_click,
     guest_exec_command,
     guest_send_keys,
     guest_type_text,
+    inspect_ui_tree,
     list_guest_processes,
     list_guest_windows,
+    observe_guest,
     open_guest_app,
+    paste_text_in_guest,
+    prepare_agent_workspace,
     pull_file_from_guest,
     push_file_to_guest,
     resolve_profile,
+    run_script_in_guest,
     run_guest_applescript,
+    scroll_in_guest,
     run_release_gate,
+    start_sandbox,
     upload_artifact_to_guest,
+    watch_sandbox,
 )
 
 
@@ -40,6 +50,57 @@ def test_resolve_profile_rejects_conflicting_image_and_profile() -> None:
 def test_resolve_profile_rejects_unknown_profile_when_image_also_set() -> None:
     with pytest.raises(SafetyError):
         resolve_profile(image="macos-sequoia-clean", profile="unknown-profile")
+
+
+def test_start_sandbox_records_vnc_watch_metadata(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("MACBOX_STATE_DIR", str(tmp_path / "state"))
+
+    with patch("macbox.workflows._backend") as backend, patch(
+        "macbox.workflows._wait_for_guest_ready"
+    ), patch("macbox.workflows._apply_profile_setup"):
+        backend.return_value.vm_exists.return_value = False
+        backend.return_value.ip.return_value = "192.168.64.2"
+
+        started = start_sandbox(
+            image="macos-sequoia-clean",
+            name="macbox-test-001",
+            display_mode="vnc",
+        )
+
+    backend.return_value.run.assert_called_once_with(
+        "macbox-test-001",
+        headless=False,
+        display_mode="vnc",
+    )
+    assert started.headless is False
+    assert started.display_mode == "vnc"
+    assert started.watch["url"] == "vnc://192.168.64.2"
+    assert started.watch["open_command"] == ["open", "vnc://192.168.64.2"]
+
+
+def test_start_sandbox_no_headless_maps_to_window(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("MACBOX_STATE_DIR", str(tmp_path / "state"))
+
+    with patch("macbox.workflows._backend") as backend, patch(
+        "macbox.workflows._wait_for_guest_ready"
+    ), patch("macbox.workflows._apply_profile_setup"):
+        backend.return_value.vm_exists.return_value = True
+        backend.return_value.ip.return_value = "192.168.64.2"
+
+        started = start_sandbox(
+            image="macos-sequoia-clean",
+            name="macbox-test-001",
+            headless=False,
+        )
+
+    backend.return_value.run.assert_called_once_with(
+        "macbox-test-001",
+        headless=False,
+        display_mode="window",
+    )
+    assert started.display_mode == "window"
+    assert started.watch["available"] is True
+    assert started.watch["mode"] == "window"
 
 
 def test_run_release_gate_requires_bundle_id_for_app_running(tmp_path) -> None:
@@ -372,11 +433,157 @@ def test_guest_click_builds_jxa_with_coordinates() -> None:
         guest_click(vm="macbox-test-001", x=100, y=200, button="left", count=2)
 
     script = jxa.call_args.kwargs["script"]
-    assert "ObjC.import('Quartz')" in script
+    assert "ObjC.import('CoreGraphics')" in script
     assert "var px = 100.0;" in script
     assert "var py = 200.0;" in script
     assert "kCGEventLeftMouseDown" in script
     assert "clicks = 2" in script
+
+
+def test_prepare_agent_workspace_resets_guest_directories() -> None:
+    with patch("macbox.workflows.guest_exec_command") as guest_exec:
+        guest_exec.return_value = GuestCommandResult(exit_code=0, stdout="", stderr="")
+        result = prepare_agent_workspace(vm="macbox-test-001", reset=True)
+
+    assert result["workspace"] == "/Users/admin/.macbox-agent"
+    command = guest_exec.call_args.kwargs["command"]
+    assert "rm -rf /Users/admin/.macbox-agent" in command
+    assert "mkdir -p /Users/admin/.macbox-agent/scripts" in command
+
+
+def test_run_script_in_guest_writes_diagnostics(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("MACBOX_STATE_DIR", str(tmp_path / "state"))
+    with patch(
+        "macbox.workflows.prepare_agent_workspace",
+        return_value={
+            "directories": {
+                "scripts": "/Users/admin/.macbox-agent/scripts",
+                "tmp": "/Users/admin/.macbox-agent/tmp",
+                "artifacts": "/Users/admin/.macbox-agent/artifacts",
+                "logs": "/Users/admin/.macbox-agent/logs",
+            }
+        },
+    ), patch("macbox.workflows._guest_session") as guest_session:
+        guest_session.return_value.exec.side_effect = [
+            GuestCommandResult(exit_code=0, stdout="", stderr=""),
+            GuestCommandResult(exit_code=7, stdout="hello\n", stderr="bad\n"),
+        ]
+
+        result = run_script_in_guest(
+            vm="macbox-test-001",
+            script="echo hello",
+            language="shell",
+            timeout=12,
+        )
+
+    guest_session.return_value.upload.assert_called_once()
+    assert result["exit_code"] == 7
+    assert Path(result["stdout"]).read_text(encoding="utf-8") == "hello\n"
+    assert Path(result["stderr"]).read_text(encoding="utf-8") == "bad\n"
+    assert Path(result["local_script"]).read_text(encoding="utf-8") == "echo hello"
+    assert guest_session.return_value.exec.call_args_list[-1].args[0].startswith("/bin/zsh ")
+
+
+def test_observe_guest_collects_screenshot_and_state(tmp_path) -> None:
+    shot = tmp_path / "shot.png"
+    shot.write_bytes(
+        b"\x89PNG\r\n\x1a\n"
+        + (13).to_bytes(4, "big")
+        + b"IHDR"
+        + (1440).to_bytes(4, "big")
+        + (900).to_bytes(4, "big")
+        + b"\x08\x02\x00\x00\x00"
+    )
+    with patch("macbox.workflows._guest_session"), patch(
+        "macbox.workflows.capture_screenshot",
+        return_value=(shot, None),
+    ), patch("macbox.workflows.run_guest_jxa") as jxa, patch(
+        "macbox.workflows.list_guest_windows"
+    ) as windows, patch(
+        "macbox.workflows.list_guest_processes"
+    ) as processes:
+        jxa.return_value = GuestCommandResult(
+            exit_code=0,
+            stdout='{"app_name":"Finder","window_title":"Desktop"}\n',
+            stderr="",
+        )
+        windows.return_value = [{"app_name": "Finder", "title": "Desktop"}]
+        processes.return_value = [{"pid": 1, "command": "Finder"}]
+
+        result = observe_guest(vm="macbox-test-001")
+
+    assert result["screenshot"] == str(shot)
+    assert result["frontmost"]["app_name"] == "Finder"
+    assert result["screen"]["width"] == 1440
+    assert result["windows"] == [{"app_name": "Finder", "title": "Desktop"}]
+    processes.assert_called_once_with(vm="macbox-test-001", filter_text="Finder")
+
+
+def test_inspect_ui_tree_returns_accessibility_failure() -> None:
+    with patch("macbox.workflows.run_guest_jxa") as jxa:
+        jxa.return_value = GuestCommandResult(exit_code=1, stdout="", stderr="not allowed assistive access")
+        result = inspect_ui_tree(vm="macbox-test-001", app_name="Demo")
+
+    assert result["accessible"] is False
+    assert "Accessibility permission" in result["hint"]
+
+
+def test_click_ui_element_requires_selector() -> None:
+    with pytest.raises(SafetyError):
+        click_ui_element(vm="macbox-test-001")
+
+
+def test_click_ui_element_generates_axpress_fallback() -> None:
+    with patch("macbox.workflows.run_guest_jxa") as jxa:
+        jxa.return_value = GuestCommandResult(exit_code=0, stdout='{"ok":true}\n', stderr="")
+        result = click_ui_element(vm="macbox-test-001", app_name="Demo", role="button", title="Continue")
+
+    script = jxa.call_args.kwargs["script"]
+    assert result["ok"] is True
+    assert "target.actions.byName('AXPress').perform()" in script
+    assert "if (!pressed)" in script
+    assert "target.click()" in script
+
+
+def test_paste_scroll_and_drag_build_guest_automation() -> None:
+    with patch("macbox.workflows.run_guest_applescript") as applescript:
+        applescript.return_value = GuestCommandResult(exit_code=0, stdout="", stderr="")
+        paste_text_in_guest(vm="macbox-test-001", text='hello "there"')
+    assert 'set the clipboard to "hello \\"there\\""' in applescript.call_args.kwargs["script"]
+
+    with patch("macbox.workflows.run_guest_jxa") as jxa:
+        jxa.return_value = GuestCommandResult(exit_code=0, stdout="", stderr="")
+        scroll_in_guest(vm="macbox-test-001", delta_x=1, delta_y=-4)
+    assert "CGEventCreateScrollWheelEvent" in jxa.call_args.kwargs["script"]
+    assert "ObjC.import('CoreGraphics')" in jxa.call_args.kwargs["script"]
+    assert "var dx = 1;" in jxa.call_args.kwargs["script"]
+
+    with patch("macbox.workflows.run_guest_jxa") as jxa:
+        jxa.return_value = GuestCommandResult(exit_code=0, stdout="", stderr="")
+        drag_in_guest(vm="macbox-test-001", start_x=1, start_y=2, end_x=3, end_y=4, steps=5)
+    script = jxa.call_args.kwargs["script"]
+    assert "ObjC.import('CoreGraphics')" in script
+    assert "kCGEventLeftMouseDragged" in script
+    assert "var steps = 5;" in script
+
+
+def test_watch_sandbox_opens_only_vnc_mode(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("MACBOX_STATE_DIR", str(tmp_path / "state"))
+    from macbox.runs import RunManager
+
+    manager = RunManager.from_config()
+    manager.create_run(
+        "macbox-test-001",
+        "macos-sequoia-clean",
+        display_mode="vnc",
+        watch={"mode": "vnc"},
+    )
+    with patch("macbox.workflows._backend") as backend, patch("macbox.workflows.run_command") as run:
+        backend.return_value.ip.return_value = "192.168.64.2"
+        result = watch_sandbox(vm="macbox-test-001", open_viewer=True)
+
+    assert result["url"] == "vnc://192.168.64.2"
+    run.assert_called_once_with(["open", "vnc://192.168.64.2"], timeout=30)
 
 
 def test_open_guest_app_builds_open_command_with_args() -> None:

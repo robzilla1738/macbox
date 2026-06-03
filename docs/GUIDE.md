@@ -170,7 +170,7 @@ Use the **local** template name (`macos-sequoia-clean`), not the `ghcr.io/...` c
 macbox start \
   --image macos-sequoia-clean \
   --name macbox-test-001 \
-  --headless \
+  --display-mode headless \
   --json
 ```
 
@@ -181,6 +181,20 @@ Rules:
 - The base template is never modified by `start`
 
 Save `run_id` and `run_dir` from the JSON response.
+
+Use `display_mode` when the user wants to watch:
+
+```bash
+macbox start --image macos-sequoia-clean --name macbox-watch-001 --display-mode window --json
+macbox start --image macos-sequoia-clean --name macbox-vnc-001 --display-mode vnc --json
+macbox watch --name macbox-vnc-001 --json
+```
+
+Modes:
+
+- `headless`: default automation mode; no live viewer
+- `window`: opens Tart's native VM window
+- `vnc`: starts Tart with `--vnc` and returns `vnc://<guest-ip>` watch metadata
 
 Named profiles can be used anywhere an image can be used:
 
@@ -206,19 +220,31 @@ For full GUI and file control inside the guest:
 ```bash
 # Keyboard and mouse automation (needs guest Accessibility permission)
 macbox type-text --name macbox-test-001 --text "hello world" --json
+macbox paste-text --name macbox-test-001 --text "larger pasted text" --json
 macbox send-keys --name macbox-test-001 --key c --modifier command --json
 macbox send-keys --name macbox-test-001 --key return --json
 macbox click --name macbox-test-001 --x 200 --y 150 --button left --count 2 --json
+macbox scroll --name macbox-test-001 --delta-y -5 --json
+macbox drag --name macbox-test-001 --start-x 200 --start-y 150 --end-x 500 --end-y 150 --json
+
+# Observe and act semantically when Accessibility is available
+macbox observe --name macbox-test-001 --json
+macbox inspect-ui-tree --name macbox-test-001 --app MyApp --max-depth 3 --json
+macbox click-ui-element --name macbox-test-001 --app MyApp --role button --title Continue --json
 
 # JavaScript for Automation (ObjC bridge) escape hatch
 macbox jxa --name macbox-test-001 --script 'Application("Finder").name()' --json
+
+# Longer guest-side scripts with diagnostics under the run directory
+macbox prepare-agent-workspace --name macbox-test-001 --json
+macbox run-script --name macbox-test-001 --language shell --script 'echo hello from guest' --json
 
 # Arbitrary file transfer in both directions (secret paths still blocked)
 macbox push --name macbox-test-001 --path ./fixtures/config.json --dest /Users/admin/config.json --json
 macbox pull --name macbox-test-001 --src /Users/admin/output.log --dest ./out/output.log --json
 ```
 
-These run inside the guest VM only. They do not expose host shell access.
+These run inside the guest VM only. They do not expose host shell access. Prefer `observe` and `inspect-ui-tree` before coordinate clicks; use `run-script` for multi-step guest work so stdout/stderr are preserved in `diagnostics/`.
 
 ### Upload a build
 
@@ -425,12 +451,21 @@ Use the venv Python so `macbox` and `mcp` are on the path.
 | `create_sandbox` | `start` with auto-generated `macbox-<id>` name |
 | `create_warm_sandbox` | Start a reusable warm VM |
 | `run_on_warm_sandbox` | Upload a local `.app` to a warm VM and smoke-test it |
+| `watch_sandbox` | Return VNC/window watch instructions for a running VM |
 | `exec_in_guest` | Run a guest shell command |
 | `run_applescript_in_guest` | Run guest AppleScript |
 | `run_jxa_in_guest` | Run guest JavaScript for Automation (ObjC bridge) |
+| `prepare_agent_workspace` | Create/reset `/Users/admin/.macbox-agent` in guest |
+| `run_script_in_guest` | Run shell/AppleScript/JXA from a guest-side file with diagnostics |
+| `observe_guest` | Capture screenshot, frontmost app/window, screen, windows, processes |
+| `inspect_ui_tree` | Read an Accessibility tree summary |
+| `click_ui_element` | Press a UI element by role/title/name selector |
 | `type_text_in_guest` | Type literal text via keyboard automation |
+| `paste_text_in_guest` | Paste text through the guest clipboard |
 | `send_keys_in_guest` | Send a key / key-combo (named keys, modifiers) |
 | `click_in_guest` | Click at guest screen coordinates |
+| `scroll_in_guest` | Send a scroll-wheel event |
+| `drag_in_guest` | Drag between guest screen coordinates |
 | `open_guest_app` | Launch an app with optional arguments |
 | `list_guest_windows` | Read visible guest window titles |
 | `list_guest_processes` | Read guest process state |
@@ -519,6 +554,8 @@ Common error codes: `SAFETY_ERROR`, `TART_ERROR`, `SSH_ERROR`, `VM_NOT_READY`, `
 | `SAFETY_ERROR` on start | Sandbox name equals base image name; pick a different `--name` |
 | Upload rejected | Path must be `.app`, `.dmg`, or `.pkg`; not a secret directory |
 | Blank screenshot | Common in headless mode; rely on logs/crashes |
+| VNC watch URL unavailable | Start with `--display-mode vnc`; headless sandboxes cannot be opened live |
+| UI tree unavailable | Grant Accessibility permission in the guest template, then retry |
 | `tart list` shows ghcr.io rows | Normal cache entries; use local `macos-sequoia-clean` |
 
 ## Testing macbox itself

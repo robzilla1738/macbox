@@ -37,6 +37,9 @@ class MacboxConfig(BaseModel):
     profiles: dict[str, dict[str, Any]] = Field(default_factory=dict)
 
 
+DisplayMode = Literal["headless", "window", "vnc"]
+
+
 class RunArtifacts(BaseModel):
     screenshots: list[str] = Field(default_factory=list)
     logs: list[str] = Field(default_factory=list)
@@ -53,6 +56,8 @@ class RunMetadata(BaseModel):
     image: str
     created_at: str
     status: Literal["running", "stopped", "destroyed", "failed"] = "running"
+    display_mode: DisplayMode = "headless"
+    watch: dict[str, Any] = Field(default_factory=dict)
     artifacts: RunArtifacts = Field(default_factory=RunArtifacts)
 
 

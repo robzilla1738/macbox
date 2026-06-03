@@ -124,6 +124,21 @@ def test_tart_clone_refuses_self_clone() -> None:
     assert exc.value.code == "TART_ERROR"
 
 
+@pytest.mark.parametrize(
+    "display_mode,expected_args",
+    [
+        ("headless", ["tart", "run", "--no-graphics", "macbox-test-001"]),
+        ("window", ["tart", "run", "macbox-test-001"]),
+        ("vnc", ["tart", "run", "--vnc", "macbox-test-001"]),
+    ],
+)
+def test_tart_run_display_modes(display_mode: str, expected_args: list[str]) -> None:
+    backend = TartBackend()
+    with patch("macbox.tart_backend.start_background_command") as start:
+        backend.run("macbox-test-001", display_mode=display_mode)
+    start.assert_called_once_with(expected_args)
+
+
 def test_artifacts_live_under_runs_root(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("MACBOX_STATE_DIR", str(tmp_path))
     manager = RunManager.from_config()
@@ -176,6 +191,15 @@ def test_mcp_has_no_host_exec_tool() -> None:
         "type_text_in_guest",
         "send_keys_in_guest",
         "click_in_guest",
+        "watch_sandbox",
+        "prepare_agent_workspace",
+        "run_script_in_guest",
+        "observe_guest",
+        "inspect_ui_tree",
+        "click_ui_element",
+        "paste_text_in_guest",
+        "scroll_in_guest",
+        "drag_in_guest",
         "open_guest_app",
         "list_guest_windows",
         "list_guest_processes",

@@ -8,7 +8,7 @@ from typing import Any
 import click
 
 from macbox.config import ensure_state_layout, get_state_dir, load_config
-from macbox.errors import AppCrashedError, MacboxError
+from macbox.errors import AppCrashedError, MacboxError, SafetyError
 from macbox.models import DoctorCheck, ErrorDetail, MacboxResponse, expand_path
 from macbox.runner import run_command
 from macbox.runs import RunManager
@@ -23,9 +23,11 @@ from macbox.workflows import (
     assert_app_running,
     assert_window_contains,
     capture_screenshot,
+    click_ui_element,
     collect_logs,
     destroy_sandbox,
     download_crash_reports,
+    drag_in_guest,
     guest_click,
     guest_exec_command,
     guest_crash_basenames,
@@ -33,12 +35,16 @@ from macbox.workflows import (
     guest_type_text,
     install_dmg_app,
     install_pkg,
+    inspect_ui_tree,
     list_profiles,
     list_guest_processes,
     list_guest_windows,
     load_report,
     mount_dmg,
+    observe_guest,
     open_guest_app,
+    paste_text_in_guest,
+    prepare_agent_workspace,
     pull_file_from_guest,
     push_file_to_guest,
     reset_sandbox,
@@ -47,11 +53,14 @@ from macbox.workflows import (
     run_guest_jxa,
     run_demo,
     run_installed_app,
+    run_script_in_guest,
     run_on_warm,
     run_matrix,
     run_release_gate,
+    scroll_in_guest,
     start_sandbox,
     upload_artifact_to_guest,
+    watch_sandbox,
 )
 
 
@@ -218,10 +227,18 @@ def prepare_cmd(image: str, as_json: bool) -> None:
 @click.option("--profile", default=None, help="Named sandbox profile or Tart image alias.")
 @click.option("--name", required=True)
 @click.option("--headless/--no-headless", default=True, show_default=True)
+@click.option("--display-mode", type=click.Choice(["headless", "window", "vnc"]), default=None)
 @click.option("--json", "as_json", is_flag=True, default=False)
-def start_cmd(image: str | None, profile: str | None, name: str, headless: bool, as_json: bool) -> None:
+def start_cmd(
+    image: str | None,
+    profile: str | None,
+    name: str,
+    headless: bool,
+    display_mode: str | None,
+    as_json: bool,
+) -> None:
     def run():
-        started = start_sandbox(image=image, profile=profile, name=name, headless=headless)
+        started = start_sandbox(image=image, profile=profile, name=name, headless=headless, display_mode=display_mode)
         emit(
             success(
                 "start",
@@ -230,6 +247,8 @@ def start_cmd(image: str | None, profile: str | None, name: str, headless: bool,
                     "image": started.image,
                     "profile": started.profile,
                     "headless": started.headless,
+                    "display_mode": started.display_mode,
+                    "watch": started.watch,
                     "run_id": started.run_id,
                     "run_dir": started.run_dir,
                 },
@@ -245,10 +264,18 @@ def start_cmd(image: str | None, profile: str | None, name: str, headless: bool,
 @click.option("--profile", default=None)
 @click.option("--name", required=True)
 @click.option("--headless/--no-headless", default=True, show_default=True)
+@click.option("--display-mode", type=click.Choice(["headless", "window", "vnc"]), default=None)
 @click.option("--json", "as_json", is_flag=True, default=False)
-def warm_cmd(image: str | None, profile: str | None, name: str, headless: bool, as_json: bool) -> None:
+def warm_cmd(
+    image: str | None,
+    profile: str | None,
+    name: str,
+    headless: bool,
+    display_mode: str | None,
+    as_json: bool,
+) -> None:
     def run():
-        started = start_sandbox(image=image, profile=profile, name=name, headless=headless)
+        started = start_sandbox(image=image, profile=profile, name=name, headless=headless, display_mode=display_mode)
         emit(
             success(
                 "warm",
@@ -257,6 +284,8 @@ def warm_cmd(image: str | None, profile: str | None, name: str, headless: bool, 
                     "image": started.image,
                     "profile": started.profile,
                     "headless": started.headless,
+                    "display_mode": started.display_mode,
+                    "watch": started.watch,
                     "run_id": started.run_id,
                     "run_dir": started.run_dir,
                     "warm": True,
@@ -300,16 +329,18 @@ def destroy_cmd(name: str, as_json: bool) -> None:
 @click.option("--profile", default=None)
 @click.option("--name", required=True)
 @click.option("--headless/--no-headless", default=True, show_default=True)
+@click.option("--display-mode", type=click.Choice(["headless", "window", "vnc"]), default=None)
 @click.option("--json", "as_json", is_flag=True, default=False)
 def reset_cmd(
     image: str | None,
     profile: str | None,
     name: str,
     headless: bool,
+    display_mode: str | None,
     as_json: bool,
 ) -> None:
     def run():
-        started = reset_sandbox(image=image, profile=profile, name=name, headless=headless)
+        started = reset_sandbox(image=image, profile=profile, name=name, headless=headless, display_mode=display_mode)
         emit(
             success(
                 "reset",
@@ -317,6 +348,9 @@ def reset_cmd(
                 data={
                     "image": started.image,
                     "profile": started.profile,
+                    "headless": started.headless,
+                    "display_mode": started.display_mode,
+                    "watch": started.watch,
                     "run_id": started.run_id,
                     "run_dir": started.run_dir,
                 },
@@ -332,16 +366,18 @@ def reset_cmd(
 @click.option("--profile", default=None)
 @click.option("--name", required=True)
 @click.option("--headless/--no-headless", default=True, show_default=True)
+@click.option("--display-mode", type=click.Choice(["headless", "window", "vnc"]), default=None)
 @click.option("--json", "as_json", is_flag=True, default=False)
 def reset_warm_cmd(
     image: str | None,
     profile: str | None,
     name: str,
     headless: bool,
+    display_mode: str | None,
     as_json: bool,
 ) -> None:
     def run():
-        started = reset_sandbox(image=image, profile=profile, name=name, headless=headless)
+        started = reset_sandbox(image=image, profile=profile, name=name, headless=headless, display_mode=display_mode)
         emit(
             success(
                 "reset-warm",
@@ -349,6 +385,9 @@ def reset_warm_cmd(
                 data={
                     "image": started.image,
                     "profile": started.profile,
+                    "headless": started.headless,
+                    "display_mode": started.display_mode,
+                    "watch": started.watch,
                     "run_id": started.run_id,
                     "run_dir": started.run_dir,
                     "warm": True,
@@ -358,6 +397,18 @@ def reset_warm_cmd(
         )
 
     handle_errors("reset-warm", name, run, as_json=as_json)
+
+
+@main.command("watch")
+@click.option("--name", required=True)
+@click.option("--open", "open_viewer", is_flag=True, default=False, help="Open the fixed VNC URL with macOS Screen Sharing.")
+@click.option("--json", "as_json", is_flag=True, default=False)
+def watch_cmd(name: str, open_viewer: bool, as_json: bool) -> None:
+    def run():
+        watch = watch_sandbox(vm=name, open_viewer=open_viewer)
+        emit(success("watch", vm=name, data={"watch": watch}), as_json=as_json)
+
+    handle_errors("watch", name, run, as_json=as_json)
 
 
 @main.command("upload")
@@ -712,6 +763,186 @@ def click_cmd(name: str, x: float, y: float, button: str, count: int, timeout: i
         emit(response, as_json=as_json)
 
     handle_errors("click", name, run, as_json=as_json)
+
+
+@main.command("prepare-agent-workspace")
+@click.option("--name", required=True)
+@click.option("--reset", is_flag=True, default=False)
+@click.option("--json", "as_json", is_flag=True, default=False)
+def prepare_agent_workspace_cmd(name: str, reset: bool, as_json: bool) -> None:
+    def run():
+        workspace = prepare_agent_workspace(vm=name, reset=reset)
+        emit(success("prepare-agent-workspace", vm=name, data=workspace), as_json=as_json)
+
+    handle_errors("prepare-agent-workspace", name, run, as_json=as_json)
+
+
+@main.command("run-script")
+@click.option("--name", required=True)
+@click.option("--script", default=None)
+@click.option("--script-file", default=None, type=click.Path(exists=True, dir_okay=False))
+@click.option("--language", default="shell", show_default=True, type=click.Choice(["shell", "applescript", "jxa"]))
+@click.option("--timeout", default=300, show_default=True)
+@click.option("--json", "as_json", is_flag=True, default=False)
+def run_script_cmd(
+    name: str,
+    script: str | None,
+    script_file: str | None,
+    language: str,
+    timeout: int,
+    as_json: bool,
+) -> None:
+    def run():
+        if bool(script) == bool(script_file):
+            raise SafetyError("Provide exactly one of --script or --script-file.")
+        script_text = Path(script_file).read_text(encoding="utf-8") if script_file else str(script)
+        result = run_script_in_guest(vm=name, script=script_text, language=language, timeout=timeout)
+        emit(success("run-script", vm=name, data=result), exit_code=int(result["exit_code"]), as_json=as_json)
+
+    handle_errors("run-script", name, run, as_json=as_json)
+
+
+@main.command("observe")
+@click.option("--name", required=True)
+@click.option("--process-filter", default=None)
+@click.option("--json", "as_json", is_flag=True, default=False)
+def observe_cmd(name: str, process_filter: str | None, as_json: bool) -> None:
+    def run():
+        observation = observe_guest(vm=name, process_filter=process_filter)
+        emit(success("observe", vm=name, data=observation, warnings=observation.get("warnings")), as_json=as_json)
+
+    handle_errors("observe", name, run, as_json=as_json)
+
+
+@main.command("inspect-ui-tree")
+@click.option("--name", required=True)
+@click.option("--app", "app_name", default=None)
+@click.option("--max-depth", default=3, show_default=True, type=int)
+@click.option("--max-items", default=100, show_default=True, type=int)
+@click.option("--json", "as_json", is_flag=True, default=False)
+def inspect_ui_tree_cmd(name: str, app_name: str | None, max_depth: int, max_items: int, as_json: bool) -> None:
+    def run():
+        tree = inspect_ui_tree(vm=name, app_name=app_name, max_depth=max_depth, max_items=max_items)
+        emit(success("inspect-ui-tree", vm=name, data=tree), exit_code=0 if tree.get("accessible") else 1, as_json=as_json)
+
+    handle_errors("inspect-ui-tree", name, run, as_json=as_json)
+
+
+@main.command("click-ui-element")
+@click.option("--name", required=True)
+@click.option("--app", "app_name", default=None)
+@click.option("--role", default=None)
+@click.option("--title", default=None)
+@click.option("--element-name", "element_name", default=None)
+@click.option("--exact", is_flag=True, default=False)
+@click.option("--timeout", default=60, show_default=True)
+@click.option("--json", "as_json", is_flag=True, default=False)
+def click_ui_element_cmd(
+    name: str,
+    app_name: str | None,
+    role: str | None,
+    title: str | None,
+    element_name: str | None,
+    exact: bool,
+    timeout: int,
+    as_json: bool,
+) -> None:
+    def run():
+        result = click_ui_element(
+            vm=name,
+            app_name=app_name,
+            role=role,
+            title=title,
+            name=element_name,
+            exact=exact,
+            timeout=timeout,
+        )
+        emit(success("click-ui-element", vm=name, data=result), exit_code=0 if result.get("ok") else 1, as_json=as_json)
+
+    handle_errors("click-ui-element", name, run, as_json=as_json)
+
+
+@main.command("paste-text")
+@click.option("--name", required=True)
+@click.option("--text", required=True)
+@click.option("--timeout", default=30, show_default=True)
+@click.option("--json", "as_json", is_flag=True, default=False)
+def paste_text_cmd(name: str, text: str, timeout: int, as_json: bool) -> None:
+    def run():
+        result = paste_text_in_guest(vm=name, text=text, timeout=timeout)
+        response = success(
+            "paste-text",
+            vm=name,
+            data={"exit_code": result.exit_code, "stdout": result.stdout, "stderr": result.stderr},
+        )
+        emit(response, exit_code=result.exit_code, as_json=as_json)
+
+    handle_errors("paste-text", name, run, as_json=as_json)
+
+
+@main.command("scroll")
+@click.option("--name", required=True)
+@click.option("--delta-x", default=0, show_default=True, type=int)
+@click.option("--delta-y", default=-5, show_default=True, type=int)
+@click.option("--timeout", default=30, show_default=True)
+@click.option("--json", "as_json", is_flag=True, default=False)
+def scroll_cmd(name: str, delta_x: int, delta_y: int, timeout: int, as_json: bool) -> None:
+    def run():
+        result = scroll_in_guest(vm=name, delta_x=delta_x, delta_y=delta_y, timeout=timeout)
+        response = success(
+            "scroll",
+            vm=name,
+            data={"delta_x": delta_x, "delta_y": delta_y, "exit_code": result.exit_code, "stdout": result.stdout, "stderr": result.stderr},
+        )
+        emit(response, exit_code=result.exit_code, as_json=as_json)
+
+    handle_errors("scroll", name, run, as_json=as_json)
+
+
+@main.command("drag")
+@click.option("--name", required=True)
+@click.option("--start-x", required=True, type=float)
+@click.option("--start-y", required=True, type=float)
+@click.option("--end-x", required=True, type=float)
+@click.option("--end-y", required=True, type=float)
+@click.option("--steps", default=12, show_default=True, type=int)
+@click.option("--timeout", default=30, show_default=True)
+@click.option("--json", "as_json", is_flag=True, default=False)
+def drag_cmd(
+    name: str,
+    start_x: float,
+    start_y: float,
+    end_x: float,
+    end_y: float,
+    steps: int,
+    timeout: int,
+    as_json: bool,
+) -> None:
+    def run():
+        result = drag_in_guest(
+            vm=name,
+            start_x=start_x,
+            start_y=start_y,
+            end_x=end_x,
+            end_y=end_y,
+            steps=steps,
+            timeout=timeout,
+        )
+        response = success(
+            "drag",
+            vm=name,
+            data={
+                "start": {"x": start_x, "y": start_y},
+                "end": {"x": end_x, "y": end_y},
+                "steps": steps,
+                "exit_code": result.exit_code,
+                "stdout": result.stdout,
+                "stderr": result.stderr,
+            },
+        )
+        emit(response, exit_code=result.exit_code, as_json=as_json)
+
+    handle_errors("drag", name, run, as_json=as_json)
 
 
 @main.command("open-app")

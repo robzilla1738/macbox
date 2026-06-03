@@ -9,6 +9,7 @@ macbox is a local CLI and MCP server for smoke-testing macOS `.app` / `.dmg` / `
 The preferred shape is:
 - high-level tools for common smoke/gate/install flows
 - guest-control tools for custom interaction inside the VM
+- observable/watchable sandbox sessions when the user wants to see the run
 - no host shell escape through MCP
 
 ## Before you run anything
@@ -21,9 +22,10 @@ The preferred shape is:
 
 ```text
 doctor / status
-  -> create_sandbox (or macbox start)
+  -> create_sandbox (or macbox start; use display_mode window/vnc if the user wants to watch)
   -> upload_app / upload_dmg / upload_pkg
   -> run_app_smoke_test / install_dmg_guest_app / install_guest_pkg
+  -> observe_guest / inspect_ui_tree before custom UI actions
   -> collect_logs / take_screenshot / collect_crashes / get_run_report (if needed)
   -> destroy_sandbox
 ```
@@ -36,15 +38,26 @@ When you need custom interaction inside the guest, use:
 exec_in_guest
 run_applescript_in_guest
 run_jxa_in_guest
+prepare_agent_workspace
+run_script_in_guest
+observe_guest
+inspect_ui_tree
+click_ui_element
 open_guest_app
 list_guest_windows
 list_guest_processes
 type_text_in_guest
+paste_text_in_guest
 send_keys_in_guest
 click_in_guest
+scroll_in_guest
+drag_in_guest
 push_file_to_guest
 pull_file_from_guest
+watch_sandbox
 ```
+
+Prefer `observe_guest` and `inspect_ui_tree` before coordinate clicks. Use `run_script_in_guest` for long shell, AppleScript, or JXA work so diagnostics are saved under `~/.macbox/runs/<run_id>/diagnostics/`. `watch_sandbox(open_viewer=true)` may only open the fixed VNC URL returned by macbox.
 
 Warm-loop shortcut:
 

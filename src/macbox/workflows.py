@@ -13,7 +13,7 @@ from typing import Any
 
 from macbox.config import load_config
 from macbox.errors import AppCrashedError, AppError, MacboxError, ProcessError, RunError, SafetyError, VMNotReadyError
-from macbox.models import expand_path
+from macbox.models import DisplayMode, expand_path
 from macbox.runner import run_command
 from macbox.runs import (
     CRASH_SUFFIXES,
@@ -34,6 +34,8 @@ from macbox.ssh import GuestSession
 from macbox.tart_backend import TartBackend
 
 GUEST_CRASH_DIR = "~/Library/Logs/DiagnosticReports"
+AGENT_WORKSPACE_BASENAME = ".macbox-agent"
+MAX_GUEST_SCRIPT_LENGTH = 262_144
 
 BUILTIN_PROFILES: dict[str, dict[str, Any]] = {
     "macos-sequoia-clean": {
@@ -87,6 +89,8 @@ class StartResult:
     run_id: str
     run_dir: str
     headless: bool
+    display_mode: DisplayMode = "headless"
+    watch: dict[str, Any] = field(default_factory=dict)
     profile: str | None = None
 
 
@@ -230,6 +234,68 @@ def _guest_session(vm_name: str) -> GuestSession:
     backend = _backend()
     ip = backend.ip(vm_name)
     return GuestSession(host=ip, config=config)
+
+
+def _display_mode_from_headless(headless: bool = True, display_mode: DisplayMode | None = None) -> DisplayMode:
+    if display_mode is None:
+        return "headless" if headless else "window"
+    if display_mode not in ("headless", "window", "vnc"):
+        raise SafetyError(
+            f"Unsupported display mode: {display_mode!r}",
+            details={"display_mode": display_mode, "allowed": ["headless", "window", "vnc"]},
+        )
+    return display_mode
+
+
+def _watch_info_for_mode(mode: DisplayMode, *, ip: str | None = None) -> dict[str, Any]:
+    if mode == "vnc":
+        url = f"vnc://{ip}" if ip else None
+        return {
+            "mode": "vnc",
+            "available": bool(url),
+            "url": url,
+            "open_command": ["open", url] if url else None,
+            "instructions": (
+                f"Open {url} with Screen Sharing to watch the guest VM."
+                if url
+                else "Wait for the VM IP, then open vnc://<guest-ip> with Screen Sharing."
+            ),
+        }
+    if mode == "window":
+        return {
+            "mode": "window",
+            "available": True,
+            "url": None,
+            "open_command": None,
+            "instructions": "Tart opened the guest VM in a native window on this Mac.",
+        }
+    return {
+        "mode": "headless",
+        "available": False,
+        "url": None,
+        "open_command": None,
+        "instructions": "Start the sandbox with display_mode='window' or display_mode='vnc' to watch it live.",
+    }
+
+
+def watch_sandbox(*, vm: str, open_viewer: bool = False) -> dict[str, Any]:
+    validate_vm_name(vm)
+    backend = _backend()
+    ip = backend.ip(vm)
+    manager = _run_manager()
+    metadata = manager.find_latest_run_for_vm(vm)
+    mode: DisplayMode = metadata.display_mode if metadata is not None else "vnc"
+    watch = _watch_info_for_mode(mode, ip=ip)
+    if mode == "headless":
+        watch["ip"] = ip
+    if open_viewer:
+        if watch["mode"] != "vnc" or not watch["url"]:
+            raise SafetyError(
+                "Only VNC watch URLs can be opened automatically.",
+                details={"vm": vm, "watch": watch},
+            )
+        run_command(["open", watch["url"]], timeout=30)
+    return watch
 
 
 def _wait_for_guest_ready(vm_name: str, *, timeout: int = 120, poll_interval: float = 2.0) -> None:
@@ -597,21 +663,493 @@ def guest_click(*, vm: str, x: float, y: float, button: str = "left", count: int
     down_event = "kCGEventRightMouseDown" if cg_button == 1 else "kCGEventLeftMouseDown"
     up_event = "kCGEventRightMouseUp" if cg_button == 1 else "kCGEventLeftMouseUp"
     jxa = (
-        "ObjC.import('Quartz');\n"
+        "ObjC.import('CoreGraphics');\n"
         f"var px = {float(x)};\n"
         f"var py = {float(y)};\n"
         f"var btn = {cg_button};\n"
         f"var clicks = {int(count)};\n"
         "var pt = $.CGPointMake(px, py);\n"
         "for (var i = 1; i <= clicks; i++) {\n"
-        f"  var down = $.CGEventCreateMouseEvent($(), $.{down_event}, pt, btn);\n"
+        f"  var down = $.CGEventCreateMouseEvent(null, $.{down_event}, pt, btn);\n"
         "  $.CGEventSetIntegerValueField(down, $.kCGMouseEventClickState, i);\n"
         "  $.CGEventPost($.kCGHIDEventTap, down);\n"
-        f"  var up = $.CGEventCreateMouseEvent($(), $.{up_event}, pt, btn);\n"
+        f"  var up = $.CGEventCreateMouseEvent(null, $.{up_event}, pt, btn);\n"
         "  $.CGEventSetIntegerValueField(up, $.kCGMouseEventClickState, i);\n"
         "  $.CGEventPost($.kCGHIDEventTap, up);\n"
         "}\n"
         "'ok'\n"
+    )
+    return run_guest_jxa(vm=vm, script=jxa, timeout=timeout)
+
+
+def _agent_workspace_root() -> str:
+    config = load_config()
+    return f"/Users/{config.guest_user}/{AGENT_WORKSPACE_BASENAME}"
+
+
+def prepare_agent_workspace(*, vm: str, reset: bool = False) -> dict[str, Any]:
+    """Create the guest-side workspace an agent can use for scripts and artifacts."""
+    validate_vm_name(vm)
+    root = _agent_workspace_root()
+    quoted_root = shlex.quote(root)
+    if reset:
+        command = f"rm -rf {quoted_root} && mkdir -p {quoted_root}/scripts {quoted_root}/tmp {quoted_root}/artifacts {quoted_root}/logs"
+    else:
+        command = f"mkdir -p {quoted_root}/scripts {quoted_root}/tmp {quoted_root}/artifacts {quoted_root}/logs"
+    result = guest_exec_command(vm=vm, command=command, timeout=60)
+    if result.exit_code != 0:
+        raise AppError(
+            "Failed to prepare guest agent workspace.",
+            details={"stdout": result.stdout, "stderr": result.stderr, "exit_code": result.exit_code},
+        )
+    return {
+        "workspace": root,
+        "reset": reset,
+        "directories": {
+            "scripts": f"{root}/scripts",
+            "tmp": f"{root}/tmp",
+            "artifacts": f"{root}/artifacts",
+            "logs": f"{root}/logs",
+        },
+    }
+
+
+def _validate_guest_script(script: str) -> str:
+    if not script.strip():
+        raise SafetyError("Guest script must not be empty")
+    if "\x00" in script:
+        raise SafetyError("Guest script contains invalid characters")
+    if len(script) > MAX_GUEST_SCRIPT_LENGTH:
+        raise SafetyError(
+            "Guest script is too long",
+            details={"max_length": MAX_GUEST_SCRIPT_LENGTH},
+        )
+    return script
+
+
+def run_script_in_guest(
+    *,
+    vm: str,
+    script: str,
+    language: str = "shell",
+    timeout: int = 300,
+) -> dict[str, Any]:
+    """Run a longer guest script from a guest-side file and persist diagnostics."""
+    validate_vm_name(vm)
+    script_text = _validate_guest_script(script)
+    language_key = language.strip().lower()
+    extensions = {"shell": "sh", "applescript": "applescript", "jxa": "js"}
+    commands = {
+        "shell": "/bin/zsh",
+        "applescript": "osascript",
+        "jxa": "osascript -l JavaScript",
+    }
+    if language_key not in extensions:
+        raise SafetyError(
+            f"Unsupported guest script language: {language!r}",
+            details={"allowed": sorted(extensions)},
+        )
+
+    workspace = prepare_agent_workspace(vm=vm, reset=False)
+    script_id = f"guest-script-{uuid.uuid4().hex[:12]}"
+    filename = f"{script_id}.{extensions[language_key]}"
+    guest_script_path = f"{workspace['directories']['scripts']}/{filename}"
+    manager = _run_manager()
+    session = _guest_session(vm)
+
+    local_script = manager.artifact_path(vm, "diagnostics", filename)
+    local_script.write_text(script_text, encoding="utf-8")
+    manager.register_artifact(vm, "diagnostics", local_script)
+    session.upload(local_script, guest_script_path)
+    if language_key == "shell":
+        session.exec(f"chmod +x {shlex.quote(guest_script_path)}", timeout=30)
+
+    command = f"{commands[language_key]} {shlex.quote(guest_script_path)}"
+    result = session.exec(command, timeout=timeout)
+
+    stdout_path = manager.artifact_path(vm, "diagnostics", f"{script_id}.stdout.txt")
+    stderr_path = manager.artifact_path(vm, "diagnostics", f"{script_id}.stderr.txt")
+    metadata_path = manager.artifact_path(vm, "diagnostics", f"{script_id}.json")
+    stdout_path.write_text(result.stdout, encoding="utf-8")
+    stderr_path.write_text(result.stderr, encoding="utf-8")
+    metadata = {
+        "script_id": script_id,
+        "language": language_key,
+        "guest_script": guest_script_path,
+        "local_script": str(local_script),
+        "stdout": str(stdout_path),
+        "stderr": str(stderr_path),
+        "exit_code": result.exit_code,
+        "timed_out": result.timed_out,
+        "command": command,
+    }
+    metadata_path.write_text(json.dumps(metadata, indent=2) + "\n", encoding="utf-8")
+    for path in (stdout_path, stderr_path, metadata_path):
+        manager.register_artifact(vm, "diagnostics", path)
+
+    return metadata
+
+
+def _parse_screen_bounds(text: str) -> dict[str, int] | None:
+    values = [int(item) for item in re.findall(r"-?\d+", text)]
+    if len(values) < 4:
+        return None
+    left, top, right, bottom = values[:4]
+    return {
+        "left": left,
+        "top": top,
+        "right": right,
+        "bottom": bottom,
+        "width": right - left,
+        "height": bottom - top,
+    }
+
+
+def _png_dimensions(path: Path) -> dict[str, int] | None:
+    try:
+        with path.open("rb") as handle:
+            header = handle.read(24)
+    except OSError:
+        return None
+    if len(header) < 24 or header[:8] != b"\x89PNG\r\n\x1a\n" or header[12:16] != b"IHDR":
+        return None
+    width = int.from_bytes(header[16:20], "big")
+    height = int.from_bytes(header[20:24], "big")
+    return {
+        "left": 0,
+        "top": 0,
+        "right": width,
+        "bottom": height,
+        "width": width,
+        "height": height,
+        "source": "screenshot",
+    }
+
+
+def _json_from_stdout(stdout: str) -> dict[str, Any] | None:
+    text = stdout.strip()
+    if not text:
+        return None
+    try:
+        return json.loads(text.splitlines()[-1])
+    except json.JSONDecodeError:
+        return None
+
+
+def observe_guest(*, vm: str, process_filter: str | None = None) -> dict[str, Any]:
+    """Collect a screenshot and structured state for the current guest GUI."""
+    validate_vm_name(vm)
+    manager = _run_manager()
+    session = _guest_session(vm)
+    screenshot_path, screenshot_warning = capture_screenshot(session, manager, vm)
+
+    warnings = [screenshot_warning] if screenshot_warning else []
+    frontmost_result = None
+    try:
+        frontmost_result = run_guest_jxa(
+            vm=vm,
+            script=(
+                "var se = Application('System Events');\n"
+                "var procs = se.applicationProcesses.whose({frontmost: true})();\n"
+                "var payload = {app_name: null, window_title: null};\n"
+                "if (procs.length > 0) {\n"
+                "  var proc = procs[0];\n"
+                "  payload.app_name = proc.name();\n"
+                "  try {\n"
+                "    var wins = proc.windows();\n"
+                "    if (wins.length > 0) payload.window_title = wins[0].title();\n"
+                "  } catch (e) {}\n"
+                "}\n"
+                "JSON.stringify(payload);\n"
+            ),
+            timeout=45,
+        )
+        frontmost = _json_from_stdout(frontmost_result.stdout) or {"app_name": None, "window_title": None}
+    except MacboxError as exc:
+        frontmost = {"app_name": None, "window_title": None}
+        warnings.append(f"Unable to inspect frontmost app: {exc.message}")
+
+    screen = _png_dimensions(screenshot_path) if screenshot_path else None
+
+    try:
+        windows = list_guest_windows(vm=vm)
+    except MacboxError as exc:
+        windows = []
+        warnings.append(f"Unable to list windows: {exc.message}")
+
+    proc_filter = process_filter or frontmost.get("app_name")
+    try:
+        processes = list_guest_processes(vm=vm, filter_text=proc_filter) if proc_filter else []
+    except MacboxError as exc:
+        processes = []
+        warnings.append(f"Unable to list processes: {exc.message}")
+
+    if frontmost_result is not None and frontmost_result.exit_code != 0:
+        warnings.append(frontmost_result.stderr or "Unable to inspect frontmost app.")
+    return {
+        "screenshot": str(screenshot_path) if screenshot_path else None,
+        "frontmost": frontmost,
+        "screen": screen,
+        "windows": windows,
+        "process_filter": proc_filter,
+        "processes": processes,
+        "warnings": warnings,
+    }
+
+
+def inspect_ui_tree(
+    *,
+    vm: str,
+    app_name: str | None = None,
+    max_depth: int = 3,
+    max_items: int = 100,
+) -> dict[str, Any]:
+    """Return an Accessibility tree summary for a guest app/window."""
+    validate_vm_name(vm)
+    if max_depth < 0 or max_depth > 8:
+        raise SafetyError("max_depth must be between 0 and 8", details={"max_depth": max_depth})
+    if max_items < 1 or max_items > 1000:
+        raise SafetyError("max_items must be between 1 and 1000", details={"max_items": max_items})
+    script = f"""
+var se = Application('System Events');
+var requestedName = {json.dumps(app_name)};
+var maxDepth = {int(max_depth)};
+var maxItems = {int(max_items)};
+function safe(fn, fallback) {{ try {{ return fn(); }} catch (e) {{ return fallback; }} }}
+function plain(value) {{
+  if (value === undefined || value === null) return null;
+  try {{
+    if (typeof value === 'object' && value.length !== undefined) return Array.prototype.slice.call(value);
+  }} catch (e) {{}}
+  return String(value);
+}}
+function frontmostProc() {{
+  var procs = se.applicationProcesses.whose({{frontmost: true}})();
+  return procs.length > 0 ? procs[0] : null;
+}}
+var proc = requestedName ? se.applicationProcesses.byName(requestedName) : frontmostProc();
+if (!proc) {{
+  JSON.stringify({{accessible: false, error: 'No frontmost application process found.'}});
+}} else {{
+  var count = 0;
+  var truncated = false;
+  function node(el, depth) {{
+    if (count >= maxItems) {{ truncated = true; return null; }}
+    count += 1;
+    var item = {{
+      role: plain(safe(function() {{ return el.role(); }}, null)),
+      subrole: plain(safe(function() {{ return el.subrole(); }}, null)),
+      title: plain(safe(function() {{ return el.title(); }}, null)),
+      name: plain(safe(function() {{ return el.name(); }}, null)),
+      description: plain(safe(function() {{ return el.description(); }}, null)),
+      value: plain(safe(function() {{ return el.value(); }}, null)),
+      enabled: safe(function() {{ return el.enabled(); }}, null),
+      position: plain(safe(function() {{ return el.position(); }}, null)),
+      size: plain(safe(function() {{ return el.size(); }}, null)),
+      children: []
+    }};
+    if (depth < maxDepth) {{
+      var children = safe(function() {{ return el.uiElements(); }}, []);
+      for (var i = 0; i < children.length; i++) {{
+        var child = node(children[i], depth + 1);
+        if (child) item.children.push(child);
+        if (count >= maxItems) break;
+      }}
+    }}
+    return item;
+  }}
+  var roots = safe(function() {{ return proc.windows(); }}, []);
+  if (roots.length === 0) roots = safe(function() {{ return proc.uiElements(); }}, []);
+  var tree = [];
+  for (var i = 0; i < roots.length; i++) {{
+    var root = node(roots[i], 0);
+    if (root) tree.push(root);
+    if (count >= maxItems) break;
+  }}
+  JSON.stringify({{
+    accessible: true,
+    app_name: plain(safe(function() {{ return proc.name(); }}, requestedName)),
+    item_count: count,
+    truncated: truncated,
+    tree: tree
+  }});
+}}
+"""
+    result = run_guest_jxa(vm=vm, script=script, timeout=90)
+    payload = _json_from_stdout(result.stdout)
+    if result.exit_code != 0:
+        return {
+            "accessible": False,
+            "app_name": app_name,
+            "error": result.stderr.strip() or result.stdout.strip() or "Unable to inspect UI tree.",
+            "hint": "Grant Accessibility permission to the guest automation runtime in the base template.",
+        }
+    return payload or {
+        "accessible": False,
+        "app_name": app_name,
+        "error": "UI tree inspection produced no JSON output.",
+    }
+
+
+def click_ui_element(
+    *,
+    vm: str,
+    app_name: str | None = None,
+    role: str | None = None,
+    title: str | None = None,
+    name: str | None = None,
+    exact: bool = False,
+    timeout: int = 60,
+) -> dict[str, Any]:
+    """Click or press a guest UI element by Accessibility role/title/name selector."""
+    validate_vm_name(vm)
+    if not any([role, title, name]):
+        raise SafetyError("Provide at least one UI selector: role, title, or name.")
+    script = f"""
+var se = Application('System Events');
+var requestedName = {json.dumps(app_name)};
+var selector = {{
+  role: {json.dumps(role)},
+  title: {json.dumps(title)},
+  name: {json.dumps(name)},
+  exact: {json.dumps(exact)}
+}};
+function safe(fn, fallback) {{ try {{ return fn(); }} catch (e) {{ return fallback; }} }}
+function plain(value) {{ return value === undefined || value === null ? '' : String(value); }}
+function norm(value) {{ return plain(value).toLowerCase(); }}
+function frontmostProc() {{
+  var procs = se.applicationProcesses.whose({{frontmost: true}})();
+  return procs.length > 0 ? procs[0] : null;
+}}
+function textMatches(actual, expected) {{
+  if (!expected) return true;
+  var a = norm(actual);
+  var e = norm(expected);
+  return selector.exact ? a === e : a.indexOf(e) !== -1;
+}}
+function matches(el) {{
+  if (selector.role && !textMatches(safe(function() {{ return el.role(); }}, ''), selector.role)) return false;
+  if (selector.title && !textMatches(safe(function() {{ return el.title(); }}, ''), selector.title)) return false;
+  if (selector.name && !textMatches(safe(function() {{ return el.name(); }}, ''), selector.name)) return false;
+  return true;
+}}
+function find(el, depth) {{
+  if (depth > 12) return null;
+  if (matches(el)) return el;
+  var children = safe(function() {{ return el.uiElements(); }}, []);
+  for (var i = 0; i < children.length; i++) {{
+    var found = find(children[i], depth + 1);
+    if (found) return found;
+  }}
+  return null;
+}}
+var proc = requestedName ? se.applicationProcesses.byName(requestedName) : frontmostProc();
+if (!proc) {{
+  JSON.stringify({{ok: false, error: 'No application process found.'}});
+}} else {{
+  var roots = safe(function() {{ return proc.windows(); }}, []);
+  if (roots.length === 0) roots = safe(function() {{ return proc.uiElements(); }}, []);
+  var target = null;
+  for (var i = 0; i < roots.length; i++) {{
+    target = find(roots[i], 0);
+    if (target) break;
+  }}
+  if (!target) {{
+    JSON.stringify({{ok: false, error: 'No matching UI element found.', selector: selector}});
+  }} else {{
+    var summary = {{
+      role: plain(safe(function() {{ return target.role(); }}, null)),
+      title: plain(safe(function() {{ return target.title(); }}, null)),
+      name: plain(safe(function() {{ return target.name(); }}, null)),
+      position: plain(safe(function() {{ return target.position(); }}, null)),
+      size: plain(safe(function() {{ return target.size(); }}, null))
+    }};
+    try {{
+      var pressed = false;
+      try {{
+        target.actions.byName('AXPress').perform();
+        pressed = true;
+      }} catch (pressError) {{}}
+      if (!pressed) {{
+        target.click();
+        pressed = true;
+      }}
+      JSON.stringify({{ok: true, app_name: plain(safe(function() {{ return proc.name(); }}, requestedName)), element: summary}});
+    }} catch (e) {{
+      JSON.stringify({{ok: false, error: String(e), element: summary}});
+    }}
+  }}
+}}
+"""
+    result = run_guest_jxa(vm=vm, script=script, timeout=timeout)
+    payload = _json_from_stdout(result.stdout)
+    if result.exit_code != 0:
+        return {
+            "ok": False,
+            "error": result.stderr.strip() or result.stdout.strip() or "Unable to click UI element.",
+            "hint": "Grant Accessibility permission to the guest automation runtime in the base template.",
+        }
+    return payload or {"ok": False, "error": "UI click produced no JSON output."}
+
+
+def paste_text_in_guest(*, vm: str, text: str, timeout: int = 30):
+    """Set the guest clipboard and paste into the frontmost app."""
+    validate_vm_name(vm)
+    script = (
+        f"set the clipboard to {_applescript_string_literal(text)}\n"
+        "tell application \"System Events\" to keystroke \"v\" using command down"
+    )
+    return run_guest_applescript(vm=vm, script=script, timeout=timeout)
+
+
+def scroll_in_guest(*, vm: str, delta_x: int = 0, delta_y: int = -5, timeout: int = 30):
+    """Send a scroll-wheel event to the guest."""
+    validate_vm_name(vm)
+    jxa = (
+        "ObjC.import('CoreGraphics');\n"
+        f"var dx = {int(delta_x)};\n"
+        f"var dy = {int(delta_y)};\n"
+        "var event = $.CGEventCreateScrollWheelEvent(null, $.kCGScrollEventUnitLine, 2, dy, dx);\n"
+        "$.CGEventPost($.kCGHIDEventTap, event);\n"
+        "'ok';\n"
+    )
+    return run_guest_jxa(vm=vm, script=jxa, timeout=timeout)
+
+
+def drag_in_guest(
+    *,
+    vm: str,
+    start_x: float,
+    start_y: float,
+    end_x: float,
+    end_y: float,
+    steps: int = 12,
+    timeout: int = 30,
+):
+    """Drag from one guest screen coordinate to another."""
+    validate_vm_name(vm)
+    if steps < 1 or steps > 200:
+        raise SafetyError("Drag steps must be between 1 and 200.", details={"steps": steps})
+    jxa = (
+        "ObjC.import('CoreGraphics');\n"
+        f"var sx = {float(start_x)};\n"
+        f"var sy = {float(start_y)};\n"
+        f"var ex = {float(end_x)};\n"
+        f"var ey = {float(end_y)};\n"
+        f"var steps = {int(steps)};\n"
+        "function point(x, y) { return $.CGPointMake(x, y); }\n"
+        "var down = $.CGEventCreateMouseEvent(null, $.kCGEventLeftMouseDown, point(sx, sy), 0);\n"
+        "$.CGEventPost($.kCGHIDEventTap, down);\n"
+        "for (var i = 1; i <= steps; i++) {\n"
+        "  var t = i / steps;\n"
+        "  var x = sx + ((ex - sx) * t);\n"
+        "  var y = sy + ((ey - sy) * t);\n"
+        "  var move = $.CGEventCreateMouseEvent(null, $.kCGEventLeftMouseDragged, point(x, y), 0);\n"
+        "  $.CGEventPost($.kCGHIDEventTap, move);\n"
+        "}\n"
+        "var up = $.CGEventCreateMouseEvent(null, $.kCGEventLeftMouseUp, point(ex, ey), 0);\n"
+        "$.CGEventPost($.kCGHIDEventTap, up);\n"
+        "'ok';\n"
     )
     return run_guest_jxa(vm=vm, script=jxa, timeout=timeout)
 
@@ -708,31 +1246,44 @@ def start_sandbox(
     image: str | None,
     name: str,
     headless: bool = True,
+    display_mode: DisplayMode | None = None,
     profile: str | None = None,
 ) -> StartResult:
+    mode = _display_mode_from_headless(headless=headless, display_mode=display_mode)
     resolved_image, setup_commands, _notes = resolve_profile(image=image, profile=profile)
     config = load_config()
     validate_start_vm(resolved_image, name, config)
     backend = _backend()
     if not backend.vm_exists(name):
         backend.clone(resolved_image, name)
-    backend.run(name, headless=headless)
-    backend.ip(name)
+    backend.run(name, headless=(mode == "headless"), display_mode=mode)
+    ip = backend.ip(name)
     _wait_for_guest_ready(name)
     manager = _run_manager()
-    metadata = manager.create_run(name, resolved_image)
+    watch = _watch_info_for_mode(mode, ip=ip)
+    metadata = manager.create_run(name, resolved_image, display_mode=mode, watch=watch)
     _apply_profile_setup(name, setup_commands)
     return StartResult(
         vm=name,
         image=resolved_image,
         run_id=metadata.run_id,
         run_dir=str(manager.run_dir(metadata.run_id)),
-        headless=headless,
+        headless=(mode == "headless"),
+        display_mode=mode,
+        watch=watch,
         profile=profile,
     )
 
 
-def reset_sandbox(*, image: str | None, name: str, headless: bool = True, profile: str | None = None) -> StartResult:
+def reset_sandbox(
+    *,
+    image: str | None,
+    name: str,
+    headless: bool = True,
+    display_mode: DisplayMode | None = None,
+    profile: str | None = None,
+) -> StartResult:
+    mode = _display_mode_from_headless(headless=headless, display_mode=display_mode)
     resolved_image, setup_commands, _notes = resolve_profile(image=image, profile=profile)
     config = load_config()
     validate_start_vm(resolved_image, name, config)
@@ -742,18 +1293,21 @@ def reset_sandbox(*, image: str | None, name: str, headless: bool = True, profil
         backend.stop(name)
         backend.delete(name)
     backend.clone(resolved_image, name)
-    backend.run(name, headless=headless)
-    backend.ip(name)
+    backend.run(name, headless=(mode == "headless"), display_mode=mode)
+    ip = backend.ip(name)
     _wait_for_guest_ready(name)
     manager = _run_manager()
-    metadata = manager.create_run(name, resolved_image)
+    watch = _watch_info_for_mode(mode, ip=ip)
+    metadata = manager.create_run(name, resolved_image, display_mode=mode, watch=watch)
     _apply_profile_setup(name, setup_commands)
     return StartResult(
         vm=name,
         image=resolved_image,
         run_id=metadata.run_id,
         run_dir=str(manager.run_dir(metadata.run_id)),
-        headless=headless,
+        headless=(mode == "headless"),
+        display_mode=mode,
+        watch=watch,
         profile=profile,
     )
 

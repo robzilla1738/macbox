@@ -7,7 +7,7 @@ import time
 from typing import Protocol
 
 from macbox.errors import TartError, VMNotReadyError
-from macbox.models import VMInfo
+from macbox.models import DisplayMode, VMInfo
 from macbox.runner import run_command, start_background_command
 
 
@@ -16,7 +16,7 @@ class VMBackend(Protocol):
 
     def clone(self, source: str, name: str) -> None: ...
 
-    def run(self, name: str, headless: bool) -> None: ...
+    def run(self, name: str, headless: bool = True, display_mode: DisplayMode | None = None) -> None: ...
 
     def stop(self, name: str) -> None: ...
 
@@ -68,10 +68,18 @@ class TartBackend:
             )
         self._tart("clone", source, name, timeout=None)
 
-    def run(self, name: str, headless: bool) -> None:
+    def run(self, name: str, headless: bool = True, display_mode: DisplayMode | None = None) -> None:
         args = [self.tart_path, "run"]
-        if headless:
+        mode = display_mode or ("headless" if headless else "window")
+        if mode == "headless":
             args.append("--no-graphics")
+        elif mode == "vnc":
+            args.append("--vnc")
+        elif mode != "window":
+            raise TartError(
+                f"Unsupported display mode: {mode}",
+                details={"display_mode": mode, "allowed": ["headless", "window", "vnc"]},
+            )
         args.append(name)
         start_background_command(args)
 

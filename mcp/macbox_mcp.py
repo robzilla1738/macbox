@@ -77,7 +77,12 @@ def list_profiles() -> dict[str, Any]:
 
 
 @mcp.tool()
-def create_sandbox(image: str, headless: bool = True, profile: str | None = None) -> dict[str, Any]:
+def create_sandbox(
+    image: str,
+    headless: bool = True,
+    profile: str | None = None,
+    display_mode: str | None = None,
+) -> dict[str, Any]:
     """Create and start a disposable sandbox VM from a base image or profile."""
     vm_name = f"macbox-{uuid.uuid4().hex[:8]}"
     validate_vm_name(vm_name)
@@ -86,7 +91,9 @@ def create_sandbox(image: str, headless: bool = True, profile: str | None = None
         args.extend(["--image", image])
     if profile:
         args.extend(["--profile", profile])
-    if headless:
+    if display_mode:
+        args.extend(["--display-mode", display_mode])
+    elif headless:
         args.append("--headless")
     else:
         args.append("--no-headless")
@@ -95,7 +102,12 @@ def create_sandbox(image: str, headless: bool = True, profile: str | None = None
 
 
 @mcp.tool()
-def create_warm_sandbox(image: str, headless: bool = True, profile: str | None = None) -> dict[str, Any]:
+def create_warm_sandbox(
+    image: str,
+    headless: bool = True,
+    profile: str | None = None,
+    display_mode: str | None = None,
+) -> dict[str, Any]:
     """Create a warm sandbox VM that stays running between tests."""
     vm_name = f"macbox-warm-{uuid.uuid4().hex[:8]}"
     validate_vm_name(vm_name)
@@ -104,7 +116,9 @@ def create_warm_sandbox(image: str, headless: bool = True, profile: str | None =
         args.extend(["--image", image])
     if profile:
         args.extend(["--profile", profile])
-    if headless:
+    if display_mode:
+        args.extend(["--display-mode", display_mode])
+    elif headless:
         args.append("--headless")
     else:
         args.append("--no-headless")
@@ -130,7 +144,12 @@ def run_on_warm_sandbox(vm_name: str, app_path: str, timeout_seconds: int = 120)
 
 
 @mcp.tool()
-def reset_warm_sandbox(vm_name: str, image: str | None = None, profile: str | None = None) -> dict[str, Any]:
+def reset_warm_sandbox(
+    vm_name: str,
+    image: str | None = None,
+    profile: str | None = None,
+    display_mode: str | None = None,
+) -> dict[str, Any]:
     """Reset a warm sandbox VM back to a clean state."""
     validate_vm_name(vm_name)
     args = ["reset-warm", "--name", vm_name]
@@ -138,7 +157,11 @@ def reset_warm_sandbox(vm_name: str, image: str | None = None, profile: str | No
         args.extend(["--image", image])
     if profile:
         args.extend(["--profile", profile])
-    args.extend(["--headless", "--json"])
+    if display_mode:
+        args.extend(["--display-mode", display_mode])
+    else:
+        args.append("--headless")
+    args.append("--json")
     return _run_macbox(*args)
 
 
@@ -265,6 +288,179 @@ def click_in_guest(
         button,
         "--count",
         str(count),
+        "--timeout",
+        str(timeout_seconds),
+        "--json",
+    )
+
+
+@mcp.tool()
+def watch_sandbox(vm_name: str, open_viewer: bool = False) -> dict[str, Any]:
+    """Return live-watch instructions for a running VM; optionally open the fixed VNC URL."""
+    validate_vm_name(vm_name)
+    args = ["watch", "--name", vm_name]
+    if open_viewer:
+        args.append("--open")
+    args.append("--json")
+    return _run_macbox(*args)
+
+
+@mcp.tool()
+def prepare_agent_workspace(vm_name: str, reset: bool = False) -> dict[str, Any]:
+    """Create or reset /Users/admin/.macbox-agent inside the guest VM."""
+    validate_vm_name(vm_name)
+    args = ["prepare-agent-workspace", "--name", vm_name]
+    if reset:
+        args.append("--reset")
+    args.append("--json")
+    return _run_macbox(*args)
+
+
+@mcp.tool()
+def run_script_in_guest(
+    vm_name: str,
+    script: str,
+    language: str = "shell",
+    timeout_seconds: int = 300,
+) -> dict[str, Any]:
+    """Run a longer shell/AppleScript/JXA script from a guest-side file and save diagnostics."""
+    validate_vm_name(vm_name)
+    return _run_macbox(
+        "run-script",
+        "--name",
+        vm_name,
+        "--script",
+        script,
+        "--language",
+        language,
+        "--timeout",
+        str(timeout_seconds),
+        "--json",
+    )
+
+
+@mcp.tool()
+def observe_guest(vm_name: str, process_filter: str | None = None) -> dict[str, Any]:
+    """Collect screenshot, frontmost app/window, visible windows, screen size, and process state."""
+    validate_vm_name(vm_name)
+    args = ["observe", "--name", vm_name]
+    if process_filter:
+        args.extend(["--process-filter", process_filter])
+    args.append("--json")
+    return _run_macbox(*args)
+
+
+@mcp.tool()
+def inspect_ui_tree(
+    vm_name: str,
+    app_name: str | None = None,
+    max_depth: int = 3,
+    max_items: int = 100,
+) -> dict[str, Any]:
+    """Return an Accessibility tree summary for a guest app/window."""
+    validate_vm_name(vm_name)
+    args = [
+        "inspect-ui-tree",
+        "--name",
+        vm_name,
+        "--max-depth",
+        str(max_depth),
+        "--max-items",
+        str(max_items),
+    ]
+    if app_name:
+        args.extend(["--app", app_name])
+    args.append("--json")
+    return _run_macbox(*args)
+
+
+@mcp.tool()
+def click_ui_element(
+    vm_name: str,
+    app_name: str | None = None,
+    role: str | None = None,
+    title: str | None = None,
+    name: str | None = None,
+    exact: bool = False,
+    timeout_seconds: int = 60,
+) -> dict[str, Any]:
+    """Click or press a guest UI element by Accessibility role/title/name selector."""
+    validate_vm_name(vm_name)
+    args = ["click-ui-element", "--name", vm_name, "--timeout", str(timeout_seconds)]
+    if app_name:
+        args.extend(["--app", app_name])
+    if role:
+        args.extend(["--role", role])
+    if title:
+        args.extend(["--title", title])
+    if name:
+        args.extend(["--element-name", name])
+    if exact:
+        args.append("--exact")
+    args.append("--json")
+    return _run_macbox(*args)
+
+
+@mcp.tool()
+def paste_text_in_guest(vm_name: str, text: str, timeout_seconds: int = 30) -> dict[str, Any]:
+    """Set the guest clipboard and paste text into the frontmost app."""
+    validate_vm_name(vm_name)
+    return _run_macbox(
+        "paste-text",
+        "--name",
+        vm_name,
+        "--text",
+        text,
+        "--timeout",
+        str(timeout_seconds),
+        "--json",
+    )
+
+
+@mcp.tool()
+def scroll_in_guest(vm_name: str, delta_x: int = 0, delta_y: int = -5, timeout_seconds: int = 30) -> dict[str, Any]:
+    """Send a guest scroll-wheel event."""
+    validate_vm_name(vm_name)
+    return _run_macbox(
+        "scroll",
+        "--name",
+        vm_name,
+        "--delta-x",
+        str(delta_x),
+        "--delta-y",
+        str(delta_y),
+        "--timeout",
+        str(timeout_seconds),
+        "--json",
+    )
+
+
+@mcp.tool()
+def drag_in_guest(
+    vm_name: str,
+    start_x: float,
+    start_y: float,
+    end_x: float,
+    end_y: float,
+    steps: int = 12,
+    timeout_seconds: int = 30,
+) -> dict[str, Any]:
+    """Drag between two guest screen coordinates."""
+    validate_vm_name(vm_name)
+    return _run_macbox(
+        "drag",
+        "--name",
+        vm_name,
+        "--start-x",
+        str(start_x),
+        "--start-y",
+        str(start_y),
+        "--end-x",
+        str(end_x),
+        "--end-y",
+        str(end_y),
+        "--steps",
+        str(steps),
         "--timeout",
         str(timeout_seconds),
         "--json",
@@ -567,12 +763,21 @@ def run_release_matrix(
 
 
 @mcp.tool()
-def reset_sandbox(image: str, vm_name: str, profile: str | None = None) -> dict[str, Any]:
+def reset_sandbox(
+    image: str,
+    vm_name: str,
+    profile: str | None = None,
+    display_mode: str | None = None,
+) -> dict[str, Any]:
     """Reset a sandbox VM from a base image or profile."""
     validate_vm_name(vm_name)
-    args = ["reset", "--name", vm_name, "--image", image, "--headless"]
+    args = ["reset", "--name", vm_name, "--image", image]
     if profile:
         args.extend(["--profile", profile])
+    if display_mode:
+        args.extend(["--display-mode", display_mode])
+    else:
+        args.append("--headless")
     args.append("--json")
     return _run_macbox(*args)
 
