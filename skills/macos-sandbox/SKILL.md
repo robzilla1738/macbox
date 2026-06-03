@@ -29,6 +29,14 @@ Use macbox when you need a disposable local macOS VM that an agent can launch, i
 3. MCP server configured locally (stdio only) or CLI available as `macbox`
 4. Accessibility-dependent UI tools may require the guest template to grant permission once
 
+## MCP profile choice
+
+Use `macbox-core` for routine smoke tests. It keeps the agent's default tool context small while covering status, sandbox lifecycle, watch metadata, typed uploads, app smoke tests, logs, screenshots, crashes, reports, doctor, reset, stop, and destroy.
+
+Enable `macbox-power` only when the task needs warm VMs, guest shell/AppleScript/JXA, long guest scripts, semantic UI inspection/clicks, keyboard/mouse control, installers, release gates, release matrix runs, or arbitrary guest file transfer.
+
+The legacy `mcp/macbox_mcp.py` entrypoint still exposes the full surface for existing clients, and can be profiled with `MACBOX_MCP_PROFILE=core|power|all`.
+
 ## Agent loop
 
 ### 1. Check readiness
@@ -182,12 +190,31 @@ Summarize for the user:
 
 ## Example MCP config
 
+Core-only:
+
 ```json
 {
   "mcpServers": {
-    "macbox": {
+    "macbox-core": {
       "command": "/absolute/path/to/macbox/.venv/bin/python",
-      "args": ["/absolute/path/to/macbox/mcp/macbox_mcp.py"]
+      "args": ["/absolute/path/to/macbox/mcp/macbox_core_mcp.py"]
+    }
+  }
+}
+```
+
+Core plus power:
+
+```json
+{
+  "mcpServers": {
+    "macbox-core": {
+      "command": "/absolute/path/to/macbox/.venv/bin/python",
+      "args": ["/absolute/path/to/macbox/mcp/macbox_core_mcp.py"]
+    },
+    "macbox-power": {
+      "command": "/absolute/path/to/macbox/.venv/bin/python",
+      "args": ["/absolute/path/to/macbox/mcp/macbox_power_mcp.py"]
     }
   }
 }

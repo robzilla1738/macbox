@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import sys
 import uuid
@@ -20,7 +21,74 @@ except ImportError as exc:  # pragma: no cover - optional dependency
         "MCP support requires the mcp package. Install with: pip install 'macbox[mcp]'"
     ) from exc
 
-mcp = FastMCP("macbox")
+MCP_PROFILE_ENV = "MACBOX_MCP_PROFILE"
+MCP_PROFILE = os.environ.get(MCP_PROFILE_ENV, "all").strip().lower() or "all"
+ALLOWED_MCP_PROFILES = {"all", "core", "power"}
+
+if MCP_PROFILE not in ALLOWED_MCP_PROFILES:
+    raise SystemExit(
+        f"{MCP_PROFILE_ENV} must be one of: {', '.join(sorted(ALLOWED_MCP_PROFILES))}"
+    )
+
+CORE_TOOL_NAMES = {
+    "macbox_status",
+    "list_images",
+    "list_profiles",
+    "create_sandbox",
+    "upload_app",
+    "upload_dmg",
+    "upload_pkg",
+    "run_app_smoke_test",
+    "collect_logs",
+    "take_screenshot",
+    "collect_crashes",
+    "get_run_report",
+    "watch_sandbox",
+    "reset_sandbox",
+    "stop_sandbox",
+    "run_doctor",
+    "destroy_sandbox",
+}
+
+mcp = FastMCP("macbox" if MCP_PROFILE == "all" else f"macbox-{MCP_PROFILE}")
+_fastmcp_tool = mcp.tool
+_ALL_TOOL_NAMES: list[str] = []
+_ACTIVE_TOOL_NAMES: list[str] = []
+
+
+def _tool_profiles(tool_name: str) -> set[str]:
+    return {"core"} if tool_name in CORE_TOOL_NAMES else {"power"}
+
+
+def _should_register_tool(tool_name: str) -> bool:
+    return MCP_PROFILE == "all" or MCP_PROFILE in _tool_profiles(tool_name)
+
+
+def _profiled_tool(*args, **kwargs):
+    """Register tools according to MACBOX_MCP_PROFILE while preserving @mcp.tool()."""
+
+    def decorate(fn):
+        _ALL_TOOL_NAMES.append(fn.__name__)
+        fn._macbox_mcp_profiles = _tool_profiles(fn.__name__)  # type: ignore[attr-defined]
+        if not _should_register_tool(fn.__name__):
+            return fn
+        _ACTIVE_TOOL_NAMES.append(fn.__name__)
+        return _fastmcp_tool(*args, **kwargs)(fn)
+
+    return decorate
+
+
+mcp.tool = _profiled_tool  # type: ignore[method-assign]
+
+
+def active_tool_names() -> list[str]:
+    """Return the tool names registered for the active MCP profile."""
+    return sorted(_ACTIVE_TOOL_NAMES)
+
+
+def all_tool_names() -> list[str]:
+    """Return every tool name known to the full MCP surface."""
+    return sorted(_ALL_TOOL_NAMES)
 
 
 def _macbox_argv() -> list[str]:

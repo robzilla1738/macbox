@@ -431,9 +431,9 @@ macbox reset --image macos-sequoia-clean --name macbox-test-001 --json
 ```json
 {
   "mcpServers": {
-    "macbox": {
+    "macbox-core": {
       "command": "/Users/you/Code/macbox/.venv/bin/python",
-      "args": ["/Users/you/Code/macbox/mcp/macbox_mcp.py"]
+      "args": ["/Users/you/Code/macbox/mcp/macbox_core_mcp.py"]
     }
   }
 }
@@ -441,7 +441,26 @@ macbox reset --image macos-sequoia-clean --name macbox-test-001 --json
 
 Use the venv Python so `macbox` and `mcp` are on the path.
 
-### Available tools
+Use `macbox-core` for routine smoke tests. It exposes 17 tools instead of the full 47-tool surface, so client-specific MCP token overhead stays much lower in normal agent turns. Add `macbox-power` only when the agent needs advanced UI automation, guest scripts, installers, release gates, warm VMs, or arbitrary guest file transfer:
+
+```json
+{
+  "mcpServers": {
+    "macbox-core": {
+      "command": "/Users/you/Code/macbox/.venv/bin/python",
+      "args": ["/Users/you/Code/macbox/mcp/macbox_core_mcp.py"]
+    },
+    "macbox-power": {
+      "command": "/Users/you/Code/macbox/.venv/bin/python",
+      "args": ["/Users/you/Code/macbox/mcp/macbox_power_mcp.py"]
+    }
+  }
+}
+```
+
+The legacy `mcp/macbox_mcp.py` server remains backward compatible and exposes all tools. It also supports `MACBOX_MCP_PROFILE=core`, `power`, or `all` for clients that prefer environment-based configuration.
+
+### Core MCP tools
 
 | Tool | What it does |
 |------|----------------|
@@ -449,9 +468,27 @@ Use the venv Python so `macbox` and `mcp` are on the path.
 | `list_images` | Local Tart VMs (same as CLI `images`) |
 | `list_profiles` | Built-in and configured sandbox profiles |
 | `create_sandbox` | `start` with auto-generated `macbox-<id>` name |
+| `watch_sandbox` | Return VNC/window watch instructions for a running VM |
+| `upload_app` | Upload `.app` to guest Desktop |
+| `upload_dmg` | Upload `.dmg` to guest Desktop |
+| `upload_pkg` | Upload `.pkg` to guest Desktop |
+| `run_app_smoke_test` | Launch app and collect evidence |
+| `collect_logs` | Recent guest syslog |
+| `take_screenshot` | Guest screen capture |
+| `collect_crashes` | DiagnosticReports from guest |
+| `get_run_report` | Load a prior structured run report |
+| `reset_sandbox` | Stop, delete, re-clone, start |
+| `stop_sandbox` | Stop a VM without deleting it |
+| `run_doctor` | Run environment checks |
+| `destroy_sandbox` | Stop and delete sandbox |
+
+### Power MCP tools
+
+| Tool | What it does |
+|------|----------------|
 | `create_warm_sandbox` | Start a reusable warm VM |
 | `run_on_warm_sandbox` | Upload a local `.app` to a warm VM and smoke-test it |
-| `watch_sandbox` | Return VNC/window watch instructions for a running VM |
+| `reset_warm_sandbox` | Reset a warm sandbox in place |
 | `exec_in_guest` | Run a guest shell command |
 | `run_applescript_in_guest` | Run guest AppleScript |
 | `run_jxa_in_guest` | Run guest JavaScript for Automation (ObjC bridge) |
@@ -469,29 +506,16 @@ Use the venv Python so `macbox` and `mcp` are on the path.
 | `open_guest_app` | Launch an app with optional arguments |
 | `list_guest_windows` | Read visible guest window titles |
 | `list_guest_processes` | Read guest process state |
-| `upload_app` | Upload `.app` to guest Desktop |
-| `upload_dmg` | Upload `.dmg` to guest Desktop |
-| `upload_pkg` | Upload `.pkg` to guest Desktop |
 | `push_file_to_guest` | Upload any file/dir to a guest path |
 | `pull_file_from_guest` | Download any file/dir from the guest |
 | `mount_dmg_image` | Mount a guest DMG |
 | `install_dmg_guest_app` | Copy an app from a DMG into `/Applications` |
 | `install_guest_pkg` | Run installer validation for a guest `.pkg` |
-| `run_app_smoke_test` | Launch app and collect evidence |
 | `run_installed_guest_app` | Launch an app from `/Applications` |
 | `assert_window` | Check a guest window title |
 | `assert_app_running` | Check a running app by bundle ID |
-| `collect_logs` | Recent guest syslog |
-| `take_screenshot` | Guest screen capture |
-| `collect_crashes` | DiagnosticReports from guest |
-| `get_run_report` | Load a prior structured run report |
 | `run_release_gate` | One-shot pass/fail validation for `.app` / `.dmg` / `.pkg` |
 | `run_release_matrix` | Run the same artifact across multiple images |
-| `reset_sandbox` | Stop, delete, re-clone, start |
-| `reset_warm_sandbox` | Reset a warm sandbox in place |
-| `stop_sandbox` | Stop a VM without deleting it |
-| `run_doctor` | Run environment checks |
-| `destroy_sandbox` | Stop and delete sandbox |
 
 MCP calls the `macbox` CLI with fixed argument arrays. It does not expose raw Tart or host shell access.
 

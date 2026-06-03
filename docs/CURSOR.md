@@ -1,6 +1,6 @@
 # Cursor MCP setup for macbox
 
-Add macbox as a local MCP server so Cursor can create sandboxes, upload apps, and run smoke tests through MCP instead of direct Tart commands.
+Add macbox as local MCP servers so Cursor can create sandboxes, upload apps, and run smoke tests through MCP instead of direct Tart commands. Use `macbox-core` by default; add `macbox-power` only when Cursor needs advanced guest control.
 
 ## Prerequisites
 
@@ -23,16 +23,16 @@ Cursor stores MCP config in one of:
 
 Use project config if macbox is part of a specific codebase.
 
-## 2. Add the macbox server
+## 2. Add the core macbox server
 
 Replace paths with your clone location:
 
 ```json
 {
   "mcpServers": {
-    "macbox": {
+    "macbox-core": {
       "command": "/Users/you/Code/macbox/.venv/bin/python",
-      "args": ["/Users/you/Code/macbox/mcp/macbox_mcp.py"]
+      "args": ["/Users/you/Code/macbox/mcp/macbox_core_mcp.py"]
     }
   }
 }
@@ -40,11 +40,30 @@ Replace paths with your clone location:
 
 Use the venv Python instead of system `python3` so the installed `macbox` and `mcp` packages resolve the same way every time.
 
+For advanced guest control, add the power server next to core:
+
+```json
+{
+  "mcpServers": {
+    "macbox-core": {
+      "command": "/Users/you/Code/macbox/.venv/bin/python",
+      "args": ["/Users/you/Code/macbox/mcp/macbox_core_mcp.py"]
+    },
+    "macbox-power": {
+      "command": "/Users/you/Code/macbox/.venv/bin/python",
+      "args": ["/Users/you/Code/macbox/mcp/macbox_power_mcp.py"]
+    }
+  }
+}
+```
+
+`macbox_core_mcp.py` exposes the 17-tool routine smoke-test surface, which keeps client-specific MCP token overhead much lower than loading every tool on every turn. `macbox_power_mcp.py` exposes the remaining advanced guest-control tools. The legacy `macbox_mcp.py` entrypoint still exposes all 47 tools for backward compatibility.
+
 Restart Cursor or reload MCP servers after saving.
 
 ## 3. Confirm the server is connected
 
-In Cursor chat, you should see **macbox** listed under available MCP tools. Try:
+In Cursor chat, you should see **macbox-core** listed under available MCP tools. Try:
 
 > Use macbox MCP only. Call macbox_status and report whether the host is ready.
 
@@ -64,10 +83,14 @@ Tools invoked (in order):
 5. `collect_logs` / `take_screenshot` / `collect_crashes` (optional)
 6. `destroy_sandbox`
 
-For more open-ended guest interaction, Cursor can also use:
+For more open-ended guest interaction, enable `macbox-power` so Cursor can also use:
 
 - `exec_in_guest`
 - `run_applescript_in_guest`
+- `run_jxa_in_guest`
+- `observe_guest`
+- `inspect_ui_tree`
+- `click_ui_element`
 - `open_guest_app`
 - `list_guest_windows`
 - `list_guest_processes`

@@ -151,22 +151,41 @@ Built-in profiles are available through `macbox profiles --json`, including `mac
 
 ## MCP for AI IDEs
 
-If you want an IDE agent to drive the sandbox, point Cursor, Claude Code, or another MCP client at the local server:
+If you want an IDE agent to drive the sandbox, point Cursor, Claude Code, or another MCP client at the local server. Use the core profile by default so routine agents do not carry the full advanced tool surface every turn:
 
 ```json
 {
   "mcpServers": {
-    "macbox": {
+    "macbox-core": {
       "command": "/absolute/path/to/macbox/.venv/bin/python",
-      "args": ["/absolute/path/to/macbox/mcp/macbox_mcp.py"]
+      "args": ["/absolute/path/to/macbox/mcp/macbox_core_mcp.py"]
     }
   }
 }
 ```
 
-Tools include `create_sandbox`, `create_warm_sandbox`, `run_on_warm_sandbox`, `upload_app`, `upload_dmg`, `install_guest_pkg`, `run_app_smoke_test`, `run_release_gate`, `run_release_matrix`, `get_run_report`, and the evidence helpers. There is also a guest-control layer: `exec_in_guest`, `run_applescript_in_guest`, `open_guest_app`, `list_guest_windows`, `list_guest_processes`, `observe_guest`, `inspect_ui_tree`, and `click_ui_element`.
+Core exposes 17 tools and covers status, image/profile discovery, sandbox lifecycle, watch metadata, typed artifact uploads, app smoke tests, logs, screenshots, crashes, reports, reset/stop, doctor, and destroy. MCP token accounting varies by client, but this keeps routine agents from loading the full 47-tool descriptor set every turn.
 
-For full control inside the VM there is also keyboard and mouse automation (`type_text_in_guest`, `send_keys_in_guest`, `click_in_guest`, `paste_text_in_guest`, `scroll_in_guest`, `drag_in_guest`), a JXA escape hatch (`run_jxa_in_guest`), an agent workspace/script runner (`prepare_agent_workspace`, `run_script_in_guest`), live-watch metadata (`watch_sandbox`), and generic bidirectional file transfer (`push_file_to_guest`, `pull_file_from_guest`).
+Add the power profile only for advanced guest control:
+
+```json
+{
+  "mcpServers": {
+    "macbox-core": {
+      "command": "/absolute/path/to/macbox/.venv/bin/python",
+      "args": ["/absolute/path/to/macbox/mcp/macbox_core_mcp.py"]
+    },
+    "macbox-power": {
+      "command": "/absolute/path/to/macbox/.venv/bin/python",
+      "args": ["/absolute/path/to/macbox/mcp/macbox_power_mcp.py"]
+    }
+  }
+}
+```
+
+Power tools include warm VM loops, guest shell/AppleScript/JXA, semantic UI observation/clicks, keyboard and mouse automation, paste/scroll/drag, app/window/process inspection, installers, release gates/matrix, arbitrary guest file transfer, and guest script diagnostics.
+
+For backward compatibility, `mcp/macbox_mcp.py` still exposes the full 47-tool surface. You can also set `MACBOX_MCP_PROFILE=core|power|all` when using that entrypoint directly.
 
 They call the CLI internally. They do not expose raw Tart or arbitrary host commands. Flexibility stays inside the guest.
 

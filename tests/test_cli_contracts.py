@@ -18,16 +18,65 @@ from macbox.safety import validate_vm_name
 from macbox.workflows import GateResult
 
 
-def _load_macbox_mcp():
+def _load_macbox_mcp(profile: str | None = None):
     root = Path(__file__).resolve().parents[1]
+    if profile is None:
+        module_name = "macbox_mcp_module"
+    else:
+        module_name = f"macbox_mcp_module_{profile}"
     spec = importlib.util.spec_from_file_location(
-        "macbox_mcp_module",
+        module_name,
         root / "mcp" / "macbox_mcp.py",
     )
     module = importlib.util.module_from_spec(spec)
     assert spec.loader is not None
+    if profile is not None:
+        import os
+
+        old_profile = os.environ.get("MACBOX_MCP_PROFILE")
+        os.environ["MACBOX_MCP_PROFILE"] = profile
+        try:
+            spec.loader.exec_module(module)
+        finally:
+            if old_profile is None:
+                os.environ.pop("MACBOX_MCP_PROFILE", None)
+            else:
+                os.environ["MACBOX_MCP_PROFILE"] = old_profile
+        return module
     spec.loader.exec_module(module)
     return module
+
+
+def _load_mcp_wrapper(script_name: str):
+    import os
+    import sys
+
+    root = Path(__file__).resolve().parents[1]
+    module_name = f"macbox_{script_name.replace('.', '_')}_module"
+    spec = importlib.util.spec_from_file_location(
+        module_name,
+        root / "mcp" / script_name,
+    )
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+
+    old_profile = os.environ.get("MACBOX_MCP_PROFILE")
+    old_path = list(sys.path)
+    old_macbox_mcp = sys.modules.pop("macbox_mcp", None)
+    os.environ.pop("MACBOX_MCP_PROFILE", None)
+    sys.path.insert(0, str(root / "mcp"))
+    try:
+        spec.loader.exec_module(module)
+        return module
+    finally:
+        sys.path[:] = old_path
+        sys.modules.pop("macbox_mcp", None)
+        if old_macbox_mcp is not None:
+            sys.modules["macbox_mcp"] = old_macbox_mcp
+        if old_profile is None:
+            os.environ.pop("MACBOX_MCP_PROFILE", None)
+        else:
+            os.environ["MACBOX_MCP_PROFILE"] = old_profile
 
 
 runner = CliRunner()
@@ -170,6 +219,53 @@ def test_mcp_create_sandbox_accepts_display_mode(monkeypatch) -> None:
     assert "--display-mode" in captured["args"]
     assert captured["args"][captured["args"].index("--display-mode") + 1] == "vnc"
     assert "--headless" not in captured["args"]
+
+
+def test_mcp_profiles_split_core_and_power_tools() -> None:
+    full = _load_macbox_mcp(profile="all")
+    core = _load_macbox_mcp(profile="core")
+    power = _load_macbox_mcp(profile="power")
+
+    full_names = set(full.active_tool_names())
+    core_names = set(core.active_tool_names())
+    power_names = set(power.active_tool_names())
+
+    assert len(full_names) == 47
+    assert len(core_names) == 17
+    assert core_names < full_names
+    assert power_names < full_names
+    assert core_names.isdisjoint(power_names)
+    assert core_names | power_names == full_names
+
+    assert {
+        "macbox_status",
+        "create_sandbox",
+        "upload_app",
+        "run_app_smoke_test",
+        "take_screenshot",
+        "destroy_sandbox",
+    }.issubset(core_names)
+    assert {
+        "run_script_in_guest",
+        "observe_guest",
+        "inspect_ui_tree",
+        "click_ui_element",
+        "drag_in_guest",
+        "run_release_matrix",
+    }.issubset(power_names)
+
+
+def test_mcp_profile_wrappers_select_expected_surfaces() -> None:
+    core_wrapper = _load_mcp_wrapper("macbox_core_mcp.py")
+    power_wrapper = _load_mcp_wrapper("macbox_power_mcp.py")
+
+    assert core_wrapper.macbox_mcp.MCP_PROFILE == "core"
+    assert power_wrapper.macbox_mcp.MCP_PROFILE == "power"
+    assert len(core_wrapper.macbox_mcp.active_tool_names()) == 17
+    assert "run_app_smoke_test" in core_wrapper.macbox_mcp.active_tool_names()
+    assert "observe_guest" not in core_wrapper.macbox_mcp.active_tool_names()
+    assert "observe_guest" in power_wrapper.macbox_mcp.active_tool_names()
+    assert "run_app_smoke_test" not in power_wrapper.macbox_mcp.active_tool_names()
 
 
 def test_mcp_new_guest_tools_build_argv(monkeypatch) -> None:

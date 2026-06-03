@@ -34,15 +34,42 @@ The user must have completed one-time setup:
 
 If doctor fails, point the user to [docs/GUIDE.md](docs/GUIDE.md). Do not guess at VM credentials in macbox config.
 
-## MCP tools (preferred for app testing)
+## MCP profiles (preferred for app testing)
+
+Configure `macbox-core` for routine app testing so agents do not carry every advanced guest-control tool in every turn. Add `macbox-power` only when the workflow needs warm VMs, installers, release gates, guest scripts, semantic UI inspection, keyboard/mouse automation, or arbitrary guest file transfer.
+
+- `mcp/macbox_core_mcp.py` exposes the core smoke-test/lifecycle surface.
+- `mcp/macbox_power_mcp.py` exposes the advanced guest-control surface.
+- `mcp/macbox_mcp.py` remains backward-compatible and exposes the full surface. It also honors `MACBOX_MCP_PROFILE=core|power|all`.
+
+### Core MCP tools
 
 | Tool | Use |
 |------|-----|
 | `macbox_status` | Check readiness before starting |
+| `list_images` | List available local Tart images |
+| `list_profiles` | List macbox sandbox profiles |
 | `create_sandbox` | New disposable VM from template |
+| `watch_sandbox` | Return native window/VNC watch instructions for a running VM |
+| `upload_app` | Copy `.app` bundle to guest |
+| `upload_dmg` | Copy `.dmg` to guest |
+| `upload_pkg` | Copy `.pkg` to guest |
+| `run_app_smoke_test` | Launch + wait + collect evidence |
+| `collect_logs` | Syslog excerpt |
+| `take_screenshot` | PNG capture |
+| `collect_crashes` | DiagnosticReports |
+| `get_run_report` | Fetch the structured report for a run |
+| `reset_sandbox` | Reset a disposable VM |
+| `stop_sandbox` | Stop a VM without deleting it |
+| `run_doctor` | Run environment readiness checks |
+| `destroy_sandbox` | Required cleanup |
+
+### Power MCP tools
+
+| Tool | Use |
+|------|-----|
 | `create_warm_sandbox` | Start a reusable warm VM |
 | `run_on_warm_sandbox` | Upload a local `.app` to a warm VM and run it |
-| `watch_sandbox` | Return native window/VNC watch instructions for a running VM |
 | `exec_in_guest` | Run a guest shell command inside the VM |
 | `run_applescript_in_guest` | Run guest AppleScript for UI automation or inspection |
 | `run_jxa_in_guest` | Run guest JavaScript for Automation (ObjC/Quartz bridge) |
@@ -60,30 +87,19 @@ If doctor fails, point the user to [docs/GUIDE.md](docs/GUIDE.md). Do not guess 
 | `open_guest_app` | Launch a guest app with optional arguments |
 | `list_guest_windows` | Inspect current guest window titles |
 | `list_guest_processes` | Inspect guest process state |
-| `upload_app` | Copy `.app` bundle to guest |
-| `upload_dmg` | Copy `.dmg` to guest |
-| `upload_pkg` | Copy `.pkg` to guest |
 | `push_file_to_guest` | Copy any file or directory to a guest path |
 | `pull_file_from_guest` | Download any file or directory from the guest |
 | `mount_dmg_image` | Mount a DMG in guest |
 | `install_dmg_guest_app` | Copy an app from a mounted DMG into `/Applications` |
 | `install_guest_pkg` | Run installer validation and optionally launch the installed app |
-| `run_app_smoke_test` | Launch + wait + collect evidence |
 | `run_installed_guest_app` | Launch app from `/Applications` |
 | `assert_window` | Verify window title content |
 | `assert_app_running` | Verify running bundle ID |
-| `collect_logs` | Syslog excerpt |
-| `take_screenshot` | PNG capture |
-| `collect_crashes` | DiagnosticReports |
-| `get_run_report` | Fetch the structured report for a run |
 | `run_release_gate` | One-shot pass/fail validation |
 | `run_release_matrix` | Fan an artifact across multiple images |
 | `reset_warm_sandbox` | Reset a warm VM back to clean state |
-| `stop_sandbox` | Stop a VM without deleting it |
-| `run_doctor` | Run environment readiness checks |
-| `destroy_sandbox` | Required cleanup |
 
-`list_images`, `list_profiles`, and `reset_sandbox` exist but most flows only need the table above.
+Most smoke tests only need `macbox-core`.
 
 ## Standard workflow
 
@@ -96,7 +112,7 @@ If doctor fails, point the user to [docs/GUIDE.md](docs/GUIDE.md). Do not guess 
 
 If the user wants to watch, use `display_mode="window"` or `display_mode="vnc"` and report `data.watch`. Use `watch_sandbox(open_viewer=true)` only for the fixed VNC URL returned by macbox.
 
-If the fixed tools are not enough, drop to guest-control tools before reaching for ad hoc host shell commands. Keep that flexibility inside the VM. Prefer `observe_guest` and `inspect_ui_tree` before coordinate clicks, and use `run_script_in_guest` for long multi-step guest work.
+If the fixed core tools are not enough, enable `macbox-power` and drop to guest-control tools before reaching for ad hoc host shell commands. Keep that flexibility inside the VM. Prefer `observe_guest` and `inspect_ui_tree` before coordinate clicks, and use `run_script_in_guest` for long multi-step guest work.
 
 Report to the user:
 
@@ -149,7 +165,7 @@ macbox run-on-warm --name macbox-warm-sequoia --app ./dist/MyApp.app --json
 
 ```
 src/macbox/     CLI and core library
-mcp/            MCP server entrypoint
+mcp/            MCP server entrypoints
 skills/         Agent skill for end users
 tests/          Unit + integration tests
 docs/GUIDE.md   Human setup guide

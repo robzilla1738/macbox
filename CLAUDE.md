@@ -10,13 +10,14 @@ The preferred shape is:
 - high-level tools for common smoke/gate/install flows
 - guest-control tools for custom interaction inside the VM
 - observable/watchable sandbox sessions when the user wants to see the run
+- split MCP profiles so routine agents can use a small core surface and opt into power tools
 - no host shell escape through MCP
 
 ## Before you run anything
 
 1. Confirm Tart and template VM exist: `macbox doctor --json` -> `"ok": true`
 2. Use sandbox names like `macbox-test-001` or MCP-generated `macbox-<hex>`. Never use `macos-sequoia-clean` as a disposable VM name.
-3. Prefer MCP tools over shell when testing apps for the user. Do not run raw `tart` commands unless debugging macbox itself.
+3. Prefer MCP tools over shell when testing apps for the user. Use `macbox-core` for routine smoke tests and add `macbox-power` only for advanced guest control. Do not run raw `tart` commands unless debugging macbox itself.
 
 ## Safe agent workflow
 
@@ -80,18 +81,37 @@ Cursor MCP setup: [docs/CURSOR.md](docs/CURSOR.md).
 
 ## MCP config (local)
 
+Use the core server by default:
+
 ```json
 {
   "mcpServers": {
-    "macbox": {
+    "macbox-core": {
       "command": "/Users/robert/Code/macbox/.venv/bin/python",
-      "args": ["/Users/robert/Code/macbox/mcp/macbox_mcp.py"]
+      "args": ["/Users/robert/Code/macbox/mcp/macbox_core_mcp.py"]
     }
   }
 }
 ```
 
-Adjust paths to the user's clone and venv.
+Add the power server only when the agent needs advanced guest control:
+
+```json
+{
+  "mcpServers": {
+    "macbox-core": {
+      "command": "/Users/robert/Code/macbox/.venv/bin/python",
+      "args": ["/Users/robert/Code/macbox/mcp/macbox_core_mcp.py"]
+    },
+    "macbox-power": {
+      "command": "/Users/robert/Code/macbox/.venv/bin/python",
+      "args": ["/Users/robert/Code/macbox/mcp/macbox_power_mcp.py"]
+    }
+  }
+}
+```
+
+Adjust paths to the user's clone and venv. `mcp/macbox_mcp.py` remains the backward-compatible full server and also supports `MACBOX_MCP_PROFILE=core|power|all`.
 
 ## What not to do
 
@@ -107,7 +127,9 @@ Adjust paths to the user's clone and venv.
 | Path | Purpose |
 |------|---------|
 | `src/macbox/cli.py` | CLI commands |
-| `mcp/macbox_mcp.py` | MCP server |
+| `mcp/macbox_core_mcp.py` | Core MCP server for routine smoke tests |
+| `mcp/macbox_power_mcp.py` | Power MCP server for advanced guest control |
+| `mcp/macbox_mcp.py` | Backward-compatible full MCP server |
 | `src/macbox/tart_backend.py` | Tart wrapper |
 | `src/macbox/ssh.py` | Guest SSH/SCP |
 | `src/macbox/safety.py` | Upload and VM name validation |

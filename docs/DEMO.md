@@ -125,7 +125,7 @@ Result:
 Prompt used in Cursor:
 
 ```text
-Use the macbox MCP tools only. Do not run shell commands.
+Use the macbox MCP tools only. Do not run shell commands. Use `macbox-core` for status/lifecycle/evidence and `macbox-power` for the release-gate tool.
 
 Create a macOS sandbox from macos-sequoia-clean, run a gate test for /Applications/Amphetamine.app, collect the report, screenshot, logs, crash summary, and destroy the sandbox. Return only the verdict and artifact paths.
 ```
@@ -156,6 +156,6 @@ The current boundary is still the right one:
 
 The next step is a stricter IDE-agent check:
 
-1. start a fresh Cursor or Codex agent session with `user-macbox` already loaded
+1. start a fresh Cursor or Codex agent session with `macbox-core` and `macbox-power` loaded
 2. verify it goes straight to MCP tool calls without local shell or file inspection
 3. repeat the same gate on a second local template image so `matrix` covers a real multi-image path instead of a single-image pass-through
