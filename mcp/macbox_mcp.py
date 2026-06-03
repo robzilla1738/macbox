@@ -204,6 +204,102 @@ def open_guest_app(
 
 
 @mcp.tool()
+def run_jxa_in_guest(vm_name: str, script: str, timeout_seconds: int = 60) -> dict[str, Any]:
+    """Run a JavaScript for Automation (JXA) script inside the guest VM.
+
+    JXA reaches the ObjC bridge (Quartz/CoreGraphics) for capabilities plain
+    AppleScript cannot express, such as synthesizing low-level input.
+    """
+    validate_vm_name(vm_name)
+    return _run_macbox("jxa", "--name", vm_name, "--script", script, "--timeout", str(timeout_seconds), "--json")
+
+
+@mcp.tool()
+def type_text_in_guest(vm_name: str, text: str, timeout_seconds: int = 30) -> dict[str, Any]:
+    """Type literal text into the frontmost guest app (keyboard automation)."""
+    validate_vm_name(vm_name)
+    return _run_macbox("type-text", "--name", vm_name, "--text", text, "--timeout", str(timeout_seconds), "--json")
+
+
+@mcp.tool()
+def send_keys_in_guest(
+    vm_name: str,
+    key: str,
+    modifiers: list[str] | None = None,
+    timeout_seconds: int = 30,
+) -> dict[str, Any]:
+    """Send a key or key-combination to the guest.
+
+    ``key`` is a single character, a named key (return, tab, escape, space,
+    delete, arrows, f1-f12, etc.), or "key:<code>" for a raw virtual key code.
+    ``modifiers`` accepts command/option/control/shift/fn (and aliases).
+    """
+    validate_vm_name(vm_name)
+    args = ["send-keys", "--name", vm_name, "--key", key]
+    for modifier in modifiers or []:
+        args.extend(["--modifier", modifier])
+    args.extend(["--timeout", str(timeout_seconds), "--json"])
+    return _run_macbox(*args)
+
+
+@mcp.tool()
+def click_in_guest(
+    vm_name: str,
+    x: float,
+    y: float,
+    button: str = "left",
+    count: int = 1,
+    timeout_seconds: int = 30,
+) -> dict[str, Any]:
+    """Click at guest screen coordinates (mouse automation via CGEvent)."""
+    validate_vm_name(vm_name)
+    return _run_macbox(
+        "click",
+        "--name",
+        vm_name,
+        "--x",
+        str(x),
+        "--y",
+        str(y),
+        "--button",
+        button,
+        "--count",
+        str(count),
+        "--timeout",
+        str(timeout_seconds),
+        "--json",
+    )
+
+
+@mcp.tool()
+def push_file_to_guest(vm_name: str, local_path: str, guest_path: str) -> dict[str, Any]:
+    """Upload an arbitrary file or directory from the host into the guest VM.
+
+    Unlike upload_app/upload_dmg/upload_pkg this accepts any file type so an
+    agent can push scripts, configs, fixtures, or source. Host paths that look
+    like secrets (keys, tokens, keychains, browser profiles) are still refused.
+    """
+    validate_vm_name(vm_name)
+    local = validate_upload_path(local_path, mcp_mode=True, allow_any_suffix=True)
+    return _run_macbox("push", "--name", vm_name, "--path", str(local), "--dest", guest_path, "--json")
+
+
+@mcp.tool()
+def pull_file_from_guest(vm_name: str, guest_path: str, local_path: str | None = None) -> dict[str, Any]:
+    """Download an arbitrary file or directory from the guest VM to the host.
+
+    When local_path is omitted the artifact is stored under the run's
+    downloads/ directory and the resulting host path is returned.
+    """
+    validate_vm_name(vm_name)
+    args = ["pull", "--name", vm_name, "--src", guest_path]
+    if local_path:
+        args.extend(["--dest", local_path])
+    args.append("--json")
+    return _run_macbox(*args)
+
+
+@mcp.tool()
 def list_guest_windows(vm_name: str, app_name: str | None = None) -> dict[str, Any]:
     """List visible guest window titles, optionally scoped to one app process name."""
     validate_vm_name(vm_name)
@@ -479,6 +575,19 @@ def reset_sandbox(image: str, vm_name: str, profile: str | None = None) -> dict[
         args.extend(["--profile", profile])
     args.append("--json")
     return _run_macbox(*args)
+
+
+@mcp.tool()
+def stop_sandbox(vm_name: str) -> dict[str, Any]:
+    """Stop a running sandbox VM without deleting it (state is preserved)."""
+    validate_vm_name(vm_name)
+    return _run_macbox("stop", "--name", vm_name, "--json")
+
+
+@mcp.tool()
+def run_doctor() -> dict[str, Any]:
+    """Run macbox environment checks (tart, ssh, scp, SSH identity, state dir)."""
+    return _run_macbox("doctor", "--json")
 
 
 @mcp.tool()

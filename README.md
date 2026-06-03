@@ -21,6 +21,7 @@ macbox handles that loop for you: create a disposable VM, copy in the artifact, 
 - **Release gates** for `.app`, `.dmg`, and `.pkg` artifacts
 - **Matrix testing** and **warm VM** flows for repeat validation
 - **Composable guest-control tools** for app launch, guest shell, AppleScript, windows, and processes
+- **Full guest automation** for keyboard input, mouse clicks, JXA, and arbitrary file push/pull
 - **Protected base templates** so `destroy` cannot wipe your base image
 
 ## Quick start
@@ -154,6 +155,8 @@ If you want an IDE agent to drive the sandbox, point Cursor, Claude Code, or ano
 
 Tools include `create_sandbox`, `create_warm_sandbox`, `run_on_warm_sandbox`, `upload_app`, `upload_dmg`, `install_guest_pkg`, `run_app_smoke_test`, `run_release_gate`, `run_release_matrix`, `get_run_report`, and the evidence helpers. There is also a guest-control layer: `exec_in_guest`, `run_applescript_in_guest`, `open_guest_app`, `list_guest_windows`, and `list_guest_processes`.
 
+For full control inside the VM there is also keyboard and mouse automation (`type_text_in_guest`, `send_keys_in_guest`, `click_in_guest`), a JXA escape hatch (`run_jxa_in_guest`), and generic bidirectional file transfer (`push_file_to_guest`, `pull_file_from_guest`).
+
 They call the CLI internally. They do not expose raw Tart or arbitrary host commands. Flexibility stays inside the guest.
 
 Example prompt:
@@ -196,7 +199,8 @@ macbox run-app --name macbox-test-001 --app /System/Applications/Calculator.app 
 
 ## Safety
 
-- MCP uploads: `.app`, `.dmg`, and `.pkg` only
+- Typed artifact uploads (`upload_app` / `upload_dmg` / `upload_pkg`) accept `.app`, `.dmg`, `.pkg` only
+- Generic `push_file_to_guest` / `pull_file_from_guest` move any file, but secret paths stay blocked
 - Secret paths blocked (`~/.ssh`, `.env`, keychains, `*token*`, etc.)
 - Guest SSH: key auth only, `BatchMode=yes`
 - Base image names are protected from `destroy` / `reset`

@@ -42,6 +42,7 @@ class RunArtifacts(BaseModel):
     logs: list[str] = Field(default_factory=list)
     crashes: list[str] = Field(default_factory=list)
     uploads: list[str] = Field(default_factory=list)
+    downloads: list[str] = Field(default_factory=list)
     reports: list[str] = Field(default_factory=list)
     diagnostics: list[str] = Field(default_factory=list)
 

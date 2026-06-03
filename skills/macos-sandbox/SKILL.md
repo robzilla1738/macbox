@@ -92,9 +92,16 @@ Or MCP equivalents: `collect_logs`, `take_screenshot`, `collect_crashes`.
 If you need a custom interaction path inside the VM, use the guest-control tools:
 - `exec_in_guest`
 - `run_applescript_in_guest`
+- `run_jxa_in_guest`
 - `open_guest_app`
 - `list_guest_windows`
 - `list_guest_processes`
+
+For full GUI and file control inside the VM:
+- `type_text_in_guest`, `send_keys_in_guest`, `click_in_guest` (keyboard/mouse automation)
+- `push_file_to_guest`, `pull_file_from_guest` (move any file in or out of the guest)
+
+Keyboard/mouse automation needs Accessibility permission granted in the guest template.
 
 ### 6. Reset or destroy sandbox
 

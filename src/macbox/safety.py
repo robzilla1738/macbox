@@ -116,6 +116,7 @@ def validate_upload_path(
     allow_override: bool = False,
     mcp_mode: bool = False,
     allowed_suffixes: tuple[str, ...] | None = None,
+    allow_any_suffix: bool = False,
 ) -> Path:
     resolved = expand_path(local_path)
 
@@ -130,6 +131,9 @@ def validate_upload_path(
             f"Refusing to upload sensitive path: {resolved}",
             details={"path": str(resolved)},
         )
+
+    if allow_any_suffix:
+        return resolved
 
     suffix = _upload_suffix(resolved)
     allowed = allowed_suffixes or ALLOWED_UPLOAD_SUFFIXES
