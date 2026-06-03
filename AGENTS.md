@@ -44,12 +44,18 @@ If doctor fails, point the user to [docs/GUIDE.md](docs/GUIDE.md). Do not guess 
 | `run_on_warm_sandbox` | Upload a local `.app` to a warm VM and run it |
 | `exec_in_guest` | Run a guest shell command inside the VM |
 | `run_applescript_in_guest` | Run guest AppleScript for UI automation or inspection |
+| `run_jxa_in_guest` | Run guest JavaScript for Automation (ObjC/Quartz bridge) |
+| `type_text_in_guest` | Type literal text into the frontmost guest app |
+| `send_keys_in_guest` | Send a key or key-combination (named keys + modifiers) |
+| `click_in_guest` | Click at guest screen coordinates |
 | `open_guest_app` | Launch a guest app with optional arguments |
 | `list_guest_windows` | Inspect current guest window titles |
 | `list_guest_processes` | Inspect guest process state |
 | `upload_app` | Copy `.app` bundle to guest |
 | `upload_dmg` | Copy `.dmg` to guest |
 | `upload_pkg` | Copy `.pkg` to guest |
+| `push_file_to_guest` | Copy any file or directory to a guest path |
+| `pull_file_from_guest` | Download any file or directory from the guest |
 | `mount_dmg_image` | Mount a DMG in guest |
 | `install_dmg_guest_app` | Copy an app from a mounted DMG into `/Applications` |
 | `install_guest_pkg` | Run installer validation and optionally launch the installed app |
@@ -64,6 +70,8 @@ If doctor fails, point the user to [docs/GUIDE.md](docs/GUIDE.md). Do not guess 
 | `run_release_gate` | One-shot pass/fail validation |
 | `run_release_matrix` | Fan an artifact across multiple images |
 | `reset_warm_sandbox` | Reset a warm VM back to clean state |
+| `stop_sandbox` | Stop a VM without deleting it |
+| `run_doctor` | Run environment readiness checks |
 | `destroy_sandbox` | Required cleanup |
 
 `list_images`, `list_profiles`, and `reset_sandbox` exist but most flows only need the table above.
@@ -89,7 +97,8 @@ Report to the user:
 ## Safety rules (required)
 
 - Never upload secret paths: `~/.ssh`, `.gnupg`, `.env`, keychains, browser profiles, files matching `*secret*`, `*token*`, `*credential*`
-- MCP only allows `.app`, `.dmg`, and `.pkg` uploads
+- Typed uploads (`upload_app`/`upload_dmg`/`upload_pkg`) allow only `.app`, `.dmg`, `.pkg`
+- `push_file_to_guest` / `pull_file_from_guest` move arbitrary files, but secret paths stay blocked
 - Never run arbitrary host shell commands as a substitute for macbox tools
 - Prefer guest-control tools over host shell when you need custom interaction
 - Never destroy template VM names (`macos-sequoia-clean`, `default_image`, `protected_images`)

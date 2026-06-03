@@ -201,6 +201,23 @@ macbox list-windows --name macbox-test-001 --json
 macbox list-processes --name macbox-test-001 --filter Ghostty --json
 ```
 
+For full GUI and file control inside the guest:
+
+```bash
+# Keyboard and mouse automation (needs guest Accessibility permission)
+macbox type-text --name macbox-test-001 --text "hello world" --json
+macbox send-keys --name macbox-test-001 --key c --modifier command --json
+macbox send-keys --name macbox-test-001 --key return --json
+macbox click --name macbox-test-001 --x 200 --y 150 --button left --count 2 --json
+
+# JavaScript for Automation (ObjC bridge) escape hatch
+macbox jxa --name macbox-test-001 --script 'Application("Finder").name()' --json
+
+# Arbitrary file transfer in both directions (secret paths still blocked)
+macbox push --name macbox-test-001 --path ./fixtures/config.json --dest /Users/admin/config.json --json
+macbox pull --name macbox-test-001 --src /Users/admin/output.log --dest ./out/output.log --json
+```
+
 These run inside the guest VM only. They do not expose host shell access.
 
 ### Upload a build
@@ -213,7 +230,7 @@ macbox upload \
   --json
 ```
 
-Uploads must be `.app` bundles, `.dmg` images, or `.pkg` files. macbox blocks obvious secret paths.
+The typed `upload` / `upload-dmg` commands accept `.app` bundles, `.dmg` images, or `.pkg` files. Use `macbox push` to copy any other file or directory into the guest, and `macbox pull` to retrieve files from the guest. All of these block obvious secret paths.
 
 ### Run a smoke test
 
@@ -410,12 +427,18 @@ Use the venv Python so `macbox` and `mcp` are on the path.
 | `run_on_warm_sandbox` | Upload a local `.app` to a warm VM and smoke-test it |
 | `exec_in_guest` | Run a guest shell command |
 | `run_applescript_in_guest` | Run guest AppleScript |
+| `run_jxa_in_guest` | Run guest JavaScript for Automation (ObjC bridge) |
+| `type_text_in_guest` | Type literal text via keyboard automation |
+| `send_keys_in_guest` | Send a key / key-combo (named keys, modifiers) |
+| `click_in_guest` | Click at guest screen coordinates |
 | `open_guest_app` | Launch an app with optional arguments |
 | `list_guest_windows` | Read visible guest window titles |
 | `list_guest_processes` | Read guest process state |
 | `upload_app` | Upload `.app` to guest Desktop |
 | `upload_dmg` | Upload `.dmg` to guest Desktop |
 | `upload_pkg` | Upload `.pkg` to guest Desktop |
+| `push_file_to_guest` | Upload any file/dir to a guest path |
+| `pull_file_from_guest` | Download any file/dir from the guest |
 | `mount_dmg_image` | Mount a guest DMG |
 | `install_dmg_guest_app` | Copy an app from a DMG into `/Applications` |
 | `install_guest_pkg` | Run installer validation for a guest `.pkg` |
@@ -431,6 +454,8 @@ Use the venv Python so `macbox` and `mcp` are on the path.
 | `run_release_matrix` | Run the same artifact across multiple images |
 | `reset_sandbox` | Stop, delete, re-clone, start |
 | `reset_warm_sandbox` | Reset a warm sandbox in place |
+| `stop_sandbox` | Stop a VM without deleting it |
+| `run_doctor` | Run environment checks |
 | `destroy_sandbox` | Stop and delete sandbox |
 
 MCP calls the `macbox` CLI with fixed argument arrays. It does not expose raw Tart or host shell access.

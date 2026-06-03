@@ -85,11 +85,12 @@ class GuestSession:
                 },
             )
 
-    def download(self, guest_path: str, local_path: Path) -> None:
+    def download(self, guest_path: str, local_path: Path, *, recursive: bool = False) -> None:
         local = expand_path(local_path)
         local.parent.mkdir(parents=True, exist_ok=True)
         remote = f"{self.user}@{self.host}:{guest_path}"
-        argv = self._base_scp_argv() + [remote, str(local)]
+        scp_args = ["-r"] if recursive else []
+        argv = self._base_scp_argv() + scp_args + [remote, str(local)]
         result = run_command(argv, timeout=600)
         if result.exit_code != 0:
             raise SSHError(

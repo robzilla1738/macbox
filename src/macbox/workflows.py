@@ -22,6 +22,7 @@ from macbox.runs import (
     list_crash_basenames,
 )
 from macbox.safety import (
+    is_denied_secret_path,
     validate_disposable_vm_operation,
     validate_guest_command,
     validate_guest_path,
@@ -94,6 +95,13 @@ class UploadResult:
     local_path: str
     guest_path: str
     artifact_type: str = ".app"
+
+
+@dataclass
+class DownloadResult:
+    guest_path: str
+    local_path: str
+    is_directory: bool = False
 
 
 @dataclass
@@ -457,6 +465,157 @@ def open_guest_app(
     )
 
 
+# Named keys mapped to macOS virtual key codes for keyboard automation.
+NAMED_KEY_CODES: dict[str, int] = {
+    "return": 36,
+    "enter": 36,
+    "tab": 48,
+    "space": 49,
+    "delete": 51,
+    "backspace": 51,
+    "escape": 53,
+    "esc": 53,
+    "forward_delete": 117,
+    "home": 115,
+    "end": 119,
+    "pageup": 116,
+    "pagedown": 121,
+    "left": 123,
+    "right": 124,
+    "down": 125,
+    "up": 126,
+    "f1": 122,
+    "f2": 120,
+    "f3": 99,
+    "f4": 118,
+    "f5": 96,
+    "f6": 97,
+    "f7": 98,
+    "f8": 100,
+    "f9": 101,
+    "f10": 109,
+    "f11": 103,
+    "f12": 111,
+}
+
+MODIFIER_ALIASES: dict[str, str] = {
+    "cmd": "command",
+    "command": "command",
+    "opt": "option",
+    "option": "option",
+    "alt": "option",
+    "ctrl": "control",
+    "control": "control",
+    "shift": "shift",
+    "fn": "function",
+    "function": "function",
+}
+
+_CLICK_BUTTONS = {"left": 0, "right": 1, "center": 2}
+
+
+def _applescript_string_literal(text: str) -> str:
+    escaped = text.replace("\\", "\\\\").replace('"', '\\"')
+    return f'"{escaped}"'
+
+
+def _modifier_clause(modifiers: list[str] | None) -> str:
+    if not modifiers:
+        return ""
+    normalized: list[str] = []
+    for raw in modifiers:
+        key = MODIFIER_ALIASES.get(raw.strip().lower())
+        if key is None:
+            raise SafetyError(
+                f"Unknown keyboard modifier: {raw!r}",
+                details={"allowed": sorted(set(MODIFIER_ALIASES.values()))},
+            )
+        normalized.append(f"{key} down")
+    return " using {" + ", ".join(normalized) + "}"
+
+
+def run_guest_jxa(*, vm: str, script: str, timeout: int = 60):
+    """Run a JavaScript for Automation (JXA) script inside the guest VM."""
+    guest_script = validate_guest_command(script)
+    command = (
+        "osascript -l JavaScript <<'JXA'\n"
+        f"{guest_script}\n"
+        "JXA"
+    )
+    return guest_exec_command(vm=vm, command=command, timeout=timeout)
+
+
+def guest_type_text(*, vm: str, text: str, timeout: int = 30):
+    """Type literal text into the frontmost guest app via System Events."""
+    validate_vm_name(vm)
+    script = (
+        "tell application \"System Events\" to keystroke "
+        f"{_applescript_string_literal(text)}"
+    )
+    return run_guest_applescript(vm=vm, script=script, timeout=timeout)
+
+
+def guest_send_keys(*, vm: str, key: str, modifiers: list[str] | None = None, timeout: int = 30):
+    """Send a single key or key-combination to the frontmost guest app.
+
+    ``key`` may be a single character, a named special key (return, tab,
+    escape, arrows, f1-f12, ...), or "key:<code>" for a raw virtual key code.
+    ``modifiers`` accepts command/option/control/shift/fn and aliases.
+    """
+    validate_vm_name(vm)
+    modifier_clause = _modifier_clause(modifiers)
+    lookup = key.strip().lower()
+    if lookup in NAMED_KEY_CODES:
+        action = f"key code {NAMED_KEY_CODES[lookup]}"
+    elif lookup.startswith("key:"):
+        code_text = lookup.split(":", 1)[1]
+        try:
+            code = int(code_text)
+        except ValueError as exc:
+            raise SafetyError(f"Invalid raw key code: {key!r}", details={"key": key}) from exc
+        action = f"key code {code}"
+    elif len(key) == 1:
+        action = f"keystroke {_applescript_string_literal(key)}"
+    else:
+        raise SafetyError(
+            f"Unsupported key: {key!r}",
+            details={"named_keys": sorted(NAMED_KEY_CODES)},
+        )
+    script = f"tell application \"System Events\" to {action}{modifier_clause}"
+    return run_guest_applescript(vm=vm, script=script, timeout=timeout)
+
+
+def guest_click(*, vm: str, x: float, y: float, button: str = "left", count: int = 1, timeout: int = 30):
+    """Synthesize a mouse click at guest screen coordinates via CGEvent (JXA)."""
+    validate_vm_name(vm)
+    button_key = button.strip().lower()
+    if button_key not in _CLICK_BUTTONS:
+        raise SafetyError(f"Unknown mouse button: {button!r}", details={"allowed": sorted(_CLICK_BUTTONS)})
+    if count < 1:
+        raise SafetyError("Click count must be >= 1", details={"count": count})
+    cg_button = _CLICK_BUTTONS[button_key]
+    down_event = "kCGEventRightMouseDown" if cg_button == 1 else "kCGEventLeftMouseDown"
+    up_event = "kCGEventRightMouseUp" if cg_button == 1 else "kCGEventLeftMouseUp"
+    jxa = (
+        "ObjC.import('Quartz');\n"
+        f"var px = {float(x)};\n"
+        f"var py = {float(y)};\n"
+        f"var btn = {cg_button};\n"
+        f"var clicks = {int(count)};\n"
+        "var pt = $.CGPointMake(px, py);\n"
+        "for (var i = 1; i <= clicks; i++) {\n"
+        f"  var down = $.CGEventCreateMouseEvent($(), $.{down_event}, pt, btn);\n"
+        "  $.CGEventSetIntegerValueField(down, $.kCGMouseEventClickState, i);\n"
+        "  $.CGEventPost($.kCGHIDEventTap, down);\n"
+        f"  var up = $.CGEventCreateMouseEvent($(), $.{up_event}, pt, btn);\n"
+        "  $.CGEventSetIntegerValueField(up, $.kCGMouseEventClickState, i);\n"
+        "  $.CGEventPost($.kCGHIDEventTap, up);\n"
+        "}\n"
+        "'ok'\n"
+    )
+    return run_guest_jxa(vm=vm, script=jxa, timeout=timeout)
+
+
 def collect_logs(
     session: GuestSession,
     manager: RunManager,
@@ -624,6 +783,66 @@ def upload_artifact_to_guest(
 
 def upload_app_to_guest(*, vm: str, local_path: str | Path, guest_path: str | None = None) -> UploadResult:
     return upload_artifact_to_guest(vm=vm, local_path=local_path, guest_path=guest_path)
+
+
+def push_file_to_guest(*, vm: str, local_path: str | Path, guest_path: str) -> UploadResult:
+    """Upload an arbitrary file or directory into the guest VM.
+
+    Not limited to .app/.dmg/.pkg, so an agent can push scripts, configs,
+    fixtures, or source trees. Host paths that look like secrets (keys, tokens,
+    keychains, browser profiles) are still refused.
+    """
+    validate_vm_name(vm)
+    validated = validate_upload_path(local_path, allow_any_suffix=True)
+    guest_dest = validate_guest_path(guest_path)
+    _wait_for_guest_ready(vm, timeout=60)
+    session = _guest_session(vm)
+    parent = str(Path(guest_dest).parent)
+    if parent and parent != "/":
+        session.exec(f"mkdir -p {shlex.quote(parent)}", timeout=30)
+    session.upload(validated, guest_dest)
+    return UploadResult(
+        local_path=str(validated),
+        guest_path=guest_dest,
+        artifact_type=_artifact_type(validated),
+    )
+
+
+def pull_file_from_guest(*, vm: str, guest_path: str, local_path: str | Path | None = None) -> DownloadResult:
+    """Download an arbitrary file or directory from the guest VM to the host.
+
+    When local_path is omitted the artifact is stored under the run's
+    ``downloads/`` directory. Writes to host secret paths are refused.
+    """
+    validate_vm_name(vm)
+    guest_src = validate_guest_path(guest_path)
+    _wait_for_guest_ready(vm, timeout=60)
+    session = _guest_session(vm)
+    if not session.remote_path_exists(guest_src):
+        raise AppError(
+            f"Guest path not found: {guest_src}",
+            details={"guest_path": guest_src},
+        )
+    is_directory = session.remote_is_directory(guest_src)
+    manager = _run_manager()
+    if local_path is None:
+        local_dest = manager.artifact_path(vm, "downloads", Path(guest_src).name)
+    else:
+        local_dest = expand_path(local_path)
+        if is_denied_secret_path(local_dest):
+            raise SafetyError(
+                f"Refusing to write to sensitive host path: {local_dest}",
+                details={"path": str(local_dest)},
+            )
+        local_dest.parent.mkdir(parents=True, exist_ok=True)
+    session.download(guest_src, local_dest, recursive=is_directory)
+    if local_path is None:
+        manager.register_artifact(vm, "downloads", local_dest)
+    return DownloadResult(
+        guest_path=guest_src,
+        local_path=str(local_dest),
+        is_directory=is_directory,
+    )
 
 
 def run_on_warm(

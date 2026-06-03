@@ -35,9 +35,15 @@ When you need custom interaction inside the guest, use:
 ```text
 exec_in_guest
 run_applescript_in_guest
+run_jxa_in_guest
 open_guest_app
 list_guest_windows
 list_guest_processes
+type_text_in_guest
+send_keys_in_guest
+click_in_guest
+push_file_to_guest
+pull_file_from_guest
 ```
 
 Warm-loop shortcut:

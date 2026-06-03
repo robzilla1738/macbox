@@ -16,10 +16,15 @@ from macbox.workflows import (
     StartResult,
     UploadResult,
     assert_app_running,
+    guest_click,
     guest_exec_command,
+    guest_send_keys,
+    guest_type_text,
     list_guest_processes,
     list_guest_windows,
     open_guest_app,
+    pull_file_from_guest,
+    push_file_to_guest,
     resolve_profile,
     run_guest_applescript,
     run_release_gate,
@@ -274,6 +279,104 @@ def test_list_guest_processes_parses_and_filters() -> None:
             "command": "/Applications/Harness.app/Contents/MacOS/Harness",
         }
     ]
+
+
+def test_push_file_to_guest_allows_any_suffix(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("MACBOX_STATE_DIR", str(tmp_path / "state"))
+    script = tmp_path / "fixture.sh"
+    script.write_text("echo hi", encoding="utf-8")
+
+    with patch("macbox.workflows._wait_for_guest_ready"), patch(
+        "macbox.workflows._guest_session"
+    ) as guest_session:
+        result = push_file_to_guest(
+            vm="macbox-test-001",
+            local_path=script,
+            guest_path="/Users/admin/fixture.sh",
+        )
+
+    guest_session.return_value.upload.assert_called_once()
+    assert result.guest_path == "/Users/admin/fixture.sh"
+    assert result.local_path == str(script.resolve())
+
+
+def test_push_file_to_guest_rejects_secret(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("MACBOX_STATE_DIR", str(tmp_path / "state"))
+    secret = tmp_path / "api-token.txt"
+    secret.write_text("x", encoding="utf-8")
+
+    with pytest.raises(SafetyError):
+        push_file_to_guest(
+            vm="macbox-test-001",
+            local_path=secret,
+            guest_path="/Users/admin/token.txt",
+        )
+
+
+def test_pull_file_from_guest_downloads_to_run_dir(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("MACBOX_STATE_DIR", str(tmp_path / "state"))
+
+    with patch("macbox.workflows._wait_for_guest_ready"), patch(
+        "macbox.workflows._guest_session"
+    ) as guest_session:
+        guest_session.return_value.remote_path_exists.return_value = True
+        guest_session.return_value.remote_is_directory.return_value = False
+        result = pull_file_from_guest(
+            vm="macbox-test-001",
+            guest_path="/Users/admin/output.log",
+        )
+
+    guest_session.return_value.download.assert_called_once()
+    assert result.guest_path == "/Users/admin/output.log"
+    assert result.is_directory is False
+    assert "downloads" in result.local_path
+
+
+def test_guest_type_text_escapes_and_wraps_keystroke() -> None:
+    with patch("macbox.workflows.run_guest_applescript") as applescript:
+        applescript.return_value = GuestCommandResult(exit_code=0, stdout="", stderr="")
+        guest_type_text(vm="macbox-test-001", text='say "hi"\\done')
+
+    script = applescript.call_args.kwargs["script"]
+    assert script == 'tell application "System Events" to keystroke "say \\"hi\\"\\\\done"'
+
+
+def test_guest_send_keys_named_key_with_modifiers() -> None:
+    with patch("macbox.workflows.run_guest_applescript") as applescript:
+        applescript.return_value = GuestCommandResult(exit_code=0, stdout="", stderr="")
+        guest_send_keys(vm="macbox-test-001", key="return", modifiers=["cmd", "shift"])
+
+    script = applescript.call_args.kwargs["script"]
+    assert script == (
+        'tell application "System Events" to key code 36 using {command down, shift down}'
+    )
+
+
+def test_guest_send_keys_single_char() -> None:
+    with patch("macbox.workflows.run_guest_applescript") as applescript:
+        applescript.return_value = GuestCommandResult(exit_code=0, stdout="", stderr="")
+        guest_send_keys(vm="macbox-test-001", key="c", modifiers=["command"])
+
+    script = applescript.call_args.kwargs["script"]
+    assert script == 'tell application "System Events" to keystroke "c" using {command down}'
+
+
+def test_guest_send_keys_rejects_unknown_modifier() -> None:
+    with pytest.raises(SafetyError):
+        guest_send_keys(vm="macbox-test-001", key="c", modifiers=["hyper"])
+
+
+def test_guest_click_builds_jxa_with_coordinates() -> None:
+    with patch("macbox.workflows.run_guest_jxa") as jxa:
+        jxa.return_value = GuestCommandResult(exit_code=0, stdout="ok", stderr="")
+        guest_click(vm="macbox-test-001", x=100, y=200, button="left", count=2)
+
+    script = jxa.call_args.kwargs["script"]
+    assert "ObjC.import('Quartz')" in script
+    assert "var px = 100.0;" in script
+    assert "var py = 200.0;" in script
+    assert "kCGEventLeftMouseDown" in script
+    assert "clicks = 2" in script
 
 
 def test_open_guest_app_builds_open_command_with_args() -> None:

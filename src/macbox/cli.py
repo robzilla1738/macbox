@@ -26,8 +26,11 @@ from macbox.workflows import (
     collect_logs,
     destroy_sandbox,
     download_crash_reports,
+    guest_click,
     guest_exec_command,
     guest_crash_basenames,
+    guest_send_keys,
+    guest_type_text,
     install_dmg_app,
     install_pkg,
     list_profiles,
@@ -36,9 +39,12 @@ from macbox.workflows import (
     load_report,
     mount_dmg,
     open_guest_app,
+    pull_file_from_guest,
+    push_file_to_guest,
     reset_sandbox,
     run_app_smoke,
     run_guest_applescript,
+    run_guest_jxa,
     run_demo,
     run_installed_app,
     run_on_warm,
@@ -566,6 +572,146 @@ def applescript_cmd(name: str, script: str, timeout: int, as_json: bool) -> None
         emit(response, as_json=as_json)
 
     handle_errors("applescript", name, run, as_json=as_json)
+
+
+@main.command("jxa")
+@click.option("--name", required=True)
+@click.option("--script", required=True)
+@click.option("--timeout", default=60, show_default=True)
+@click.option("--json", "as_json", is_flag=True, default=False)
+def jxa_cmd(name: str, script: str, timeout: int, as_json: bool) -> None:
+    def run():
+        result = run_guest_jxa(vm=name, script=script, timeout=timeout)
+        response = success(
+            "jxa",
+            vm=name,
+            data={"exit_code": result.exit_code, "stdout": result.stdout, "stderr": result.stderr},
+        )
+        if result.exit_code != 0:
+            emit(response, exit_code=result.exit_code, as_json=as_json)
+        emit(response, as_json=as_json)
+
+    handle_errors("jxa", name, run, as_json=as_json)
+
+
+@main.command("push")
+@click.option("--name", required=True)
+@click.option("--path", "local_path", required=True, type=click.Path())
+@click.option("--dest", "guest_path", required=True)
+@click.option("--json", "as_json", is_flag=True, default=False)
+def push_cmd(name: str, local_path: str, guest_path: str, as_json: bool) -> None:
+    def run():
+        result = push_file_to_guest(vm=name, local_path=local_path, guest_path=guest_path)
+        emit(
+            success(
+                "push",
+                vm=name,
+                data={
+                    "local_path": result.local_path,
+                    "guest_path": result.guest_path,
+                    "artifact_type": result.artifact_type,
+                },
+            ),
+            as_json=as_json,
+        )
+
+    handle_errors("push", name, run, as_json=as_json)
+
+
+@main.command("pull")
+@click.option("--name", required=True)
+@click.option("--src", "guest_path", required=True)
+@click.option("--dest", "local_path", default=None, type=click.Path())
+@click.option("--json", "as_json", is_flag=True, default=False)
+def pull_cmd(name: str, guest_path: str, local_path: str | None, as_json: bool) -> None:
+    def run():
+        result = pull_file_from_guest(vm=name, guest_path=guest_path, local_path=local_path)
+        emit(
+            success(
+                "pull",
+                vm=name,
+                data={
+                    "guest_path": result.guest_path,
+                    "local_path": result.local_path,
+                    "is_directory": result.is_directory,
+                },
+            ),
+            as_json=as_json,
+        )
+
+    handle_errors("pull", name, run, as_json=as_json)
+
+
+@main.command("type-text")
+@click.option("--name", required=True)
+@click.option("--text", required=True)
+@click.option("--timeout", default=30, show_default=True)
+@click.option("--json", "as_json", is_flag=True, default=False)
+def type_text_cmd(name: str, text: str, timeout: int, as_json: bool) -> None:
+    def run():
+        result = guest_type_text(vm=name, text=text, timeout=timeout)
+        response = success(
+            "type-text",
+            vm=name,
+            data={"exit_code": result.exit_code, "stdout": result.stdout, "stderr": result.stderr},
+        )
+        if result.exit_code != 0:
+            emit(response, exit_code=result.exit_code, as_json=as_json)
+        emit(response, as_json=as_json)
+
+    handle_errors("type-text", name, run, as_json=as_json)
+
+
+@main.command("send-keys")
+@click.option("--name", required=True)
+@click.option("--key", required=True)
+@click.option("--modifier", "modifiers", multiple=True, help="Repeatable: command/option/control/shift/fn.")
+@click.option("--timeout", default=30, show_default=True)
+@click.option("--json", "as_json", is_flag=True, default=False)
+def send_keys_cmd(name: str, key: str, modifiers: tuple[str, ...], timeout: int, as_json: bool) -> None:
+    def run():
+        result = guest_send_keys(vm=name, key=key, modifiers=list(modifiers), timeout=timeout)
+        response = success(
+            "send-keys",
+            vm=name,
+            data={"exit_code": result.exit_code, "stdout": result.stdout, "stderr": result.stderr},
+        )
+        if result.exit_code != 0:
+            emit(response, exit_code=result.exit_code, as_json=as_json)
+        emit(response, as_json=as_json)
+
+    handle_errors("send-keys", name, run, as_json=as_json)
+
+
+@main.command("click")
+@click.option("--name", required=True)
+@click.option("--x", required=True, type=float)
+@click.option("--y", required=True, type=float)
+@click.option("--button", default="left", show_default=True, type=click.Choice(["left", "right", "center"]))
+@click.option("--count", default=1, show_default=True, type=int)
+@click.option("--timeout", default=30, show_default=True)
+@click.option("--json", "as_json", is_flag=True, default=False)
+def click_cmd(name: str, x: float, y: float, button: str, count: int, timeout: int, as_json: bool) -> None:
+    def run():
+        result = guest_click(vm=name, x=x, y=y, button=button, count=count, timeout=timeout)
+        response = success(
+            "click",
+            vm=name,
+            data={
+                "x": x,
+                "y": y,
+                "button": button,
+                "count": count,
+                "exit_code": result.exit_code,
+                "stdout": result.stdout,
+                "stderr": result.stderr,
+            },
+        )
+        if result.exit_code != 0:
+            emit(response, exit_code=result.exit_code, as_json=as_json)
+        emit(response, as_json=as_json)
+
+    handle_errors("click", name, run, as_json=as_json)
 
 
 @main.command("open-app")
